@@ -9,8 +9,9 @@ English · [한국어](README.ko.md)
 
 Deployable [Sigma](https://sigmahq.io) rules that formalize the pseudo-rules in the defense guide
 ([Korean](../docs/defense-ko.md) · [English](../docs/defense-en.md), section 4) into a vendor-neutral
-format you can convert to your own SIEM or EDR query language. Every indicator here is grounded in a
-string or behaviour verified in this repository's source, not inferred.
+format you can convert to your own SIEM or EDR query language. Current indicators are grounded in
+strings or behaviour verified in this repository's source; the former guard marker is retained for
+historical-log detection.
 
 ## Atomic rules
 
@@ -19,7 +20,9 @@ string or behaviour verified in this repository's source, not inferred.
 - **`sigma/artex_selfupdate_egress.yml`** — outbound `artex-selfupdate` User-Agent from the self-update
   routine (`selfupdate/github.go`). Host/forensic egress indicator. `level: medium`.
 - **`sigma/artex_guard_audit_framing.yml`** — the platform-guard control marker written to the audit log
-  on a blocked tool call (`guard/guard.go`). Host/forensic indicator. `level: high`.
+  on a blocked tool call (`guard/guard.go`). Current runs emit
+  `[ARTEX platform policy; not a target-side defense]`; the rule also detects the former
+  `【ARTEX 平台管控·非目标防御】` marker in older logs. Host/forensic indicator. `level: high`.
 - **`sigma/destructive_command_hunting.yml`** — destructive shell/DB commands mirroring the ARTEX guard's
   built-in deny list (`db/db.go` seed). Generic hunting lead, not an ARTEX signature. `level: medium`.
 - **`sigma/artex_recording_proxy_ca.yml`** — creation of the recording proxy's MITM CA file under the
@@ -78,9 +81,9 @@ from drifting away from the rule set.
 ## Indicator list (machine-readable)
 
 For defenders who want the atomic indicators rather than the detection logic,
-[`indicators/artex_indicators.csv`](indicators/) collects the unique fingerprints ARTEX emits into one
-CSV to drop into a threat-intelligence platform, a SIEM lookup, or a host-triage checklist — the enrichment
-and self-update User-Agents, the guard audit marker, the server/proxy default endpoints, the recording-proxy
+[`indicators/artex_indicators.csv`](indicators/) collects current ARTEX fingerprints and the legacy guard
+marker into one CSV for a threat-intelligence platform, a SIEM lookup, or a host-triage checklist — the enrichment
+and self-update User-Agents, both guard audit markers, the server/proxy default endpoints, the recording-proxy
 CA certificate, and the PostgreSQL exploration-graph schema fingerprint — each row recording the source file
 it is grounded in and the rule (if any) built on it. The same indicators ship as a
 ready-to-import [MISP](https://www.misp-project.org/) event
@@ -133,17 +136,18 @@ The rules ship with reproducible tests in [`tests/`](tests/), each needing only 
   consistent with the rules: its scored techniques and tactics must be exactly the `attack.*` tags on the
   rule set, and each technique must name a rule file that exists. Adding a rule without updating the layer
   (or vice versa) fails the test.
-- **Indicator source-of-truth** ([`tests/indicators/run.sh`](tests/indicators/run.sh)) checks that each rule's
+- **Indicator source-of-truth** ([`tests/indicators/run.sh`](tests/indicators/run.sh)) checks that each current
   pinned indicator is still the string the upstream source emits — `artex-enrich/1.0` in `enrich/enrich.go`,
-  `artex-selfupdate` in `selfupdate/`, the guard marker in `guard/guard.go`, the destructive tokens in
-  `db/db.go` — and is still pinned in the rule. It catches the drift the other three miss: an upstream re-sync
+  `artex-selfupdate` in `selfupdate/`, the English guard marker in `guard/guard.go`, the destructive tokens in
+  `db/db.go` — and is still pinned in the rule. The legacy Chinese marker remains covered in the rule and
+  published indicator list for older logs. It catches the drift the other three miss: an upstream re-sync
   that changes a User-Agent or marker while every rule still compiles and fires. The same test re-reads the
   machine-readable [`indicators/artex_indicators.csv`](indicators/artex_indicators.csv) and asserts every
-  published row is still grounded in its source and rule, so the artifact a defender imports cannot drift
-  either. Finally it asserts that every upstream source it reads is listed in the CI workflow's `push` and
+  current row is still grounded in its source and rule, while the legacy marker remains documented and
+  detectable. Finally it asserts that every upstream source it reads is listed in the CI workflow's `push` and
   `pull_request` paths filter, so a PR touching only a newly pinned source cannot skip the test and let that
-  drift pass the merge gate. This makes "grounded in a string verified in this repository's source, not
-  inferred" (above) a guard, not a promise.
+  drift pass the merge gate. This makes the source grounding for current markers and historical coverage
+  for the legacy marker checks that a reviewer can run.
 - **MISP export consistency** ([`tests/misp/run.sh`](tests/misp/run.sh)) proves the MISP event
   ([`indicators/artex_indicators.misp.json`](indicators/artex_indicators.misp.json)) is a valid MISP document —
   it loads under [pymisp](https://github.com/MISP/PyMISP), whose object model rejects any attribute type that

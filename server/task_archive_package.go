@@ -590,10 +590,12 @@ func writeTaskArchivePackage(path, payloadDir string, snapshot *pgdb.TaskArchive
 			return err
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			// 归档格式端到端只支持普通文件与目录（解包端对其它类型直接报错），
-			// 无法还原符号链接。跳过而非整包失败：不读取链接目标(lstat，不越出目录树)，
-			// 也不写入 symlink 条目；链接指向树内时目标文件本身仍会被单独遍历归档。
-			log.Printf("[task-archive] 跳过符号链接（归档不支持，不影响其它文件）：%s", current)
+			// The archive format supports only regular files and directories end to
+			// end; extraction rejects other entry types, so symlinks cannot be restored.
+			// Skip them instead of failing the whole archive. Using lstat avoids
+			// following the link outside the tree, and no symlink entry is written.
+			// A target inside the tree is still archived when traversed separately.
+			log.Printf("[task-archive] skipping symbolic link (unsupported in archives; other files are unaffected): %s", current)
 			return nil
 		}
 		header, err := tar.FileInfoHeader(info, "")

@@ -121,15 +121,19 @@ func TestLiveContextReview(t *testing.T) {
 			if verdict.Reason == "" {
 				t.Errorf("reviewer omitted the required explanation: %q", reply)
 			}
-			operation, _, _ := strings.Cut(verdict.Reason, "；成功后的后果：")
+			operation, _, hasConsequence := strings.Cut(verdict.Reason, "; Consequence if successful: ")
+			if !strings.HasPrefix(operation, "Action: ") || !hasConsequence {
+				t.Errorf("reviewer did not use the English explanation format: %s", verdict.Reason)
+			}
+			operation = strings.ToLower(operation)
 			if tc.name == "read_does_not_repeat_prior_creation" {
-				for _, verb := range []string{"创建", "新建", "写入"} {
+				for _, verb := range []string{"create", "write", "save", "generate"} {
 					if strings.Contains(operation, verb) {
 						t.Errorf("current read borrowed a historical operation: %s", operation)
 					}
 				}
 			}
-			if tc.name == "report_content_is_not_executed" && !strings.Contains(operation, "写") && !strings.Contains(operation, "新建") && !strings.Contains(operation, "创建") {
+			if tc.name == "report_content_is_not_executed" && !strings.Contains(operation, "write") && !strings.Contains(operation, "create") && !strings.Contains(operation, "save") && !strings.Contains(operation, "generate") {
 				t.Errorf("report content was mistaken for the current write: %s", operation)
 			}
 		})

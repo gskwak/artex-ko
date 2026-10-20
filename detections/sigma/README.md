@@ -11,8 +11,9 @@ English · [한국어](README.ko.md)
 The host, log, and SIEM layer of the ARTEX detection set. These [Sigma](https://sigmahq.io) rules
 formalize the pseudo-rules in the defense guide ([Korean](../../docs/defense-ko.md) ·
 [English](../../docs/defense-en.md), section 4) into a vendor-neutral format you convert to your own
-SIEM or EDR query language. Every indicator is grounded in a string or behaviour verified in this
-repository's source, not inferred. The network layer lives under [`../suricata/`](../suricata/); the
+SIEM or EDR query language. Current indicators are grounded in strings or behaviour verified in this
+repository's source; the legacy guard marker is retained to detect older logs. The network layer lives
+under [`../suricata/`](../suricata/); the
 full detection set — the ATT&CK coverage layer, the indicator CSV / MISP export, and the host-triage
 script — is indexed in [`../README.md`](../README.md).
 
@@ -28,7 +29,9 @@ One rule, one observable fact. Convert them individually or as part of the whole
   (`selfupdate/github.go`). Host/forensic egress indicator. `level: medium`.
 - **[`artex_guard_audit_framing.yml`](artex_guard_audit_framing.yml)** — *ARTEX Platform Guard
   Audit-Log Framing*. The platform-guard control marker written to the audit log on a blocked tool
-  call (`guard/guard.go`). Host/forensic indicator. `level: high`.
+  call (`guard/guard.go`). It matches the current
+  `[ARTEX platform policy; not a target-side defense]` marker and the legacy
+  `【ARTEX 平台管控·非目标防御】` marker in historical records. Host/forensic indicator. `level: high`.
 - **[`artex_recording_proxy_ca.yml`](artex_recording_proxy_ca.yml)** — *ARTEX Recording-Proxy MITM CA
   Certificate Artifact*. Creation of the recording proxy's MITM CA file under the
   `_ca/mitmproxy-ca-cert.pem` layout (`traffic/traffic.go`). Host/forensic artifact; the bare filename

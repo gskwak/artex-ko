@@ -58,7 +58,7 @@
 - **기록형 MITM 프록시 `127.0.0.1:8788`.** worker 의 Bash·HTTP 실행을 가로채 전 과정을 기록하는 로컬 프록시의 기본 주소입니다(`cmd/artex/main.go` 의 `--proxy` 기본값, 루프백 전용). 자체 CA 를 생성해 TLS 를 복호화·기록하므로(`mitmproxy-ca-cert.pem`), 호스트에 **ARTEX 가 설치한 신뢰 CA 인증서**가 있는지, 그리고 서브프로세스에 `HTTP_PROXY`·프록시 CA 경로 환경변수를 주입하는 흔적이 있는지가 단서가 됩니다. 이 주입은 ARTEX 가 생성하는 모든 worker 도구에 들어가고 변수 이름이 소스에 하드코딩이라(`agent/worker.go`), **실행 중인 프로세스가 프록시 변수와 mitmproxy CA 신뢰 변수를 함께 지니는지**는 포트 하나보다 특이적인 지문입니다. [호스트 분류 도구](../detections/triage/README.ko.md)가 `/proc`(또는 포렌식 이미지에서는 캡처한 환경변수 덤프)에서 이 조합을 확인합니다.
 - **self-update 콜백 `artex-selfupdate`.** 자가 업데이트가 GitHub 릴리스를 조회할 때 쓰는 User-Agent 입니다(`selfupdate/`). 송신(egress) 로그에서 이 UA 로 코드 저장소 호스트에 나가는 요청이 보이면 ARTEX 바이너리의 존재를 시사합니다.
 - **PostgreSQL 상의 이중 그래프.** `exploration_nodes`·`assets`·`companies`·`activity` 같은 테이블과 `agent_prompts` 시드가 있는 DB 는 ARTEX 데이터 저장소의 특징입니다.
-- **DB 기반 정규식 승인 규칙과 감사 로그.** 도구 호출을 평가하는 intercept 규칙이 DB 에 저장되고 우선순위대로 정규식으로 평가됩니다(`intercept/`). 차단된 호출은 감사 로그(`GET /api/audit`)에 `【ARTEX 平台管控·非目标防御】` 로 시작하는 통제 프레이밍과 함께 남으므로, 침해 호스트의 감사 기록에서 이 문자열이 보이면 ARTEX 실행을 뒷받침합니다.
+- **DB 기반 정규식 승인 규칙과 감사 로그.** 도구 호출을 평가하는 intercept 규칙이 DB 에 저장되고 우선순위대로 정규식으로 평가됩니다(`intercept/`). 새 차단 기록은 감사 로그(`GET /api/audit`)에 `[ARTEX platform policy; not a target-side defense]` 로 시작하는 통제 프레이밍과 함께 남습니다. 이전 기록은 `【ARTEX 平台管控·非目标防御】` 로 시작할 수 있습니다. 침해 호스트의 감사 기록에서 어느 쪽이든 발견되면 ARTEX 실행을 뒷받침합니다.
 - **파괴적 명령 헌팅 지표.** ARTEX 자체 가드가 차단 대상으로 내장한 명령 패턴은 곧 자율 에이전트가 **시도할 수 있는** 명령군의 역상입니다. 호스트 명령 감사에서 아래를 헌팅 지표로 삼으십시오: `rm -rf`, `mkfs`, `dd of=/dev/`, `shred`/`wipe`, SQL `DROP DATABASE`/`DROP TABLE`/`TRUNCATE`, MongoDB `drop`/`dropDatabase`, Redis `FLUSHALL`/`FLUSHDB`, `curl`/`wget` 의 `-X DELETE`, 그리고 `curl … | nc …` 류의 데이터 반출 파이프. 다만 맨 끝의 데이터 반출 파이프는 데이터를 파괴하는 명령이 아니라 밖으로 빼내는 유출 신호라 성격이 다릅니다. 앞의 파괴 패턴과 달리 ARTEX 가드도 이 규칙만은 기본값으로 꺼 둔 채 내장하는데(정상적인 점검용 리버스셸이나 데이터 전송 파이프에 오탐이 잦기 때문입니다), 배포용 파괴 명령 헌팅 규칙([`destructive_command_hunting.yml`](../detections/sigma/destructive_command_hunting.yml))도 파괴 범위에만 한정돼 이 패턴을 포함하지 않으므로, 반출 파이프는 곧바로 차단하지 말고 별도 헌팅 지표로 두어 환경에 맞게 조정하십시오.
 
 > 정리: **대상 쪽 방어는 행동 지문에 걸고, 정적 UA(`artex-enrich/1.0`·`norma/0.4` 등)는 보조 단서로만** 씁니다. 운영자·포렌식 지문(`:8787`·`127.0.0.1:8788`·`artex-selfupdate`·DB 스키마·감사 로그 프레이밍)은 **침해된 경유 호스트를 조사할 때** 유효합니다.
@@ -346,7 +346,7 @@ ARTEX 연루가 의심될 때 가장 먼저 확인할 것을 순서로 정리합
    ```
    두 포트는 `--addr`·`--proxy` 플래그로 바뀔 수 있으므로, 이 조회가 비어도 열린 포트 전체와 내부 관리 UI 가 떠 있는지를 함께 봅니다.
 2. **송신 로그.** 자가 업데이트 User-Agent `artex-selfupdate` 로 코드 저장소 호스트(GitHub 릴리스)에 나간 요청이 송신 로그에 있는지 확인합니다(`selfupdate/`). 이 호스트에서 ARTEX 바이너리가 돌았음을 시사합니다.
-3. **감사 로그.** 가드 통제 마커 `【ARTEX 平台管控·非目标防御】` 가 감사 기록에 있으면 ARTEX 실행을 뒷받침합니다(`guard/guard.go`). 차단된 도구 호출마다 이 프레이밍으로 남습니다.
+3. **감사 로그.** 가드는 새로 차단된 도구 호출에 `[ARTEX platform policy; not a target-side defense]` 를 기록합니다. 이전 기록에는 `【ARTEX 平台管控·非目标防御】` 가 있을 수 있습니다(`guard/guard.go`). 어느 표시자든 ARTEX 실행을 뒷받침합니다.
 4. **상태·기록 저장소.** ARTEX 는 PostgreSQL 에 탐색 그래프를 두고(`exploration_nodes`·`assets`·`companies`·`activity` 테이블과 `agent_prompts` 시드), 실행 파일 옆 데이터 디렉터리(`cmd/artex/main.go` 의 `--data` 기본값)에 상태와 기록을 남깁니다. 이 디렉터리 바로 아래에는 작업별 산출물을 담는 `tasks/` 와 대화 기록을 담는 `transcripts/` 하위 디렉터리가 있고, 기록 프록시의 산출물은 그 안의 `traffic/` 하위 디렉터리에 따로 모입니다(`server/manager.go` 가 데이터 디렉터리 아래 `traffic/` 를 기록 프록시 저장소로 엽니다). 그래서 신뢰 CA 인증서는 `traffic/_ca/mitmproxy-ca-cert.pem`, 트래픽 색인은 `traffic/_index/index.sqlite`, 기록한 요청·응답 본문은 `traffic/_blobs/` 에 있습니다. 이 셋이 `tasks/`·`transcripts/` 와 함께 보이면 기록 프록시가 실제로 돌았다는 정황이 강해집니다.
 5. **명령 감사.** 파괴적 명령 헌팅 지표(2절 (나) 끝의 `rm -rf`·`DROP DATABASE`·`FLUSHALL`·반출 파이프 등)를 호스트 명령 이력과 대조합니다. 정당한 관리자도 같은 명령을 쓰므로 단서로만 다룹니다.
 

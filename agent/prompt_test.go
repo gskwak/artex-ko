@@ -17,11 +17,11 @@ func TestRenderSystemOverrideAndFallback(t *testing.T) {
 	// override → rendered with vars
 	PromptOverride = func(k string) (string, bool) {
 		if k == "planner" {
-			return "目标:{{.Goal}} 范围:{{.Scope}}", true
+			return "Goal:{{.Goal}} Scope:{{.Scope}}", true
 		}
 		return "", false
 	}
-	if got := renderSystem("planner", "DEFAULT", PlannerVars{Goal: "拿下X", Scope: "*.x.com"}); got != "目标:拿下X 范围:*.x.com" {
+	if got := renderSystem("planner", "DEFAULT", PlannerVars{Goal: "Assess X", Scope: "*.x.com"}); got != "Goal:Assess X Scope:*.x.com" {
 		t.Fatalf("override render: %q", got)
 	}
 
@@ -32,13 +32,13 @@ func TestRenderSystemOverrideAndFallback(t *testing.T) {
 	}
 
 	// full plannerSystem path: DB body [A] is honored, then the code-owned tail
-	// [C] (中间产物输出规约) is ALWAYS appended — editing the body can't drop it.
+	// [C] (Intermediate-artifact rules) is ALWAYS appended — editing the body can't drop it.
 	PromptOverride = func(k string) (string, bool) { return "PLANNER {{.Goal}}", true }
-	got := plannerSystem("拿下X", "/data", "/data")
-	if !strings.HasPrefix(got, "PLANNER 拿下X") {
+	got := plannerSystem("Assess X", "/data", "/data")
+	if !strings.HasPrefix(got, "PLANNER Assess X") {
 		t.Fatalf("plannerSystem body not honored: %q", got)
 	}
-	if !strings.Contains(got, "中间产物输出规约") || !strings.Contains(got, "/data") {
+	if !strings.Contains(got, "Intermediate-artifact rules") || !strings.Contains(got, "/data") {
 		t.Fatalf("plannerSystem missing code-owned artifact tail: %q", got)
 	}
 
@@ -48,10 +48,10 @@ func TestRenderSystemOverrideAndFallback(t *testing.T) {
 	// block is gated on the CA (arg 2), NOT on ProxyAddr — a global egress proxy
 	// with capture off routes traffic but records nothing.
 	PromptOverride = func(k string) (string, bool) {
-		return "{{if .ProxyAddr}}走代理 {{.ProxyAddr}}{{else}}手动{{end}}", true
+		return "{{if .ProxyAddr}}Use proxy {{.ProxyAddr}}{{else}}Manual{{end}}", true
 	}
 	recording := workerSystem("127.0.0.1:8080", "/ca.pem", "/data", "/data")
-	if !strings.HasPrefix(recording, "走代理 127.0.0.1:8080") {
+	if !strings.HasPrefix(recording, "Use proxy 127.0.0.1:8080") {
 		t.Fatalf("worker proxy branch body: %q", recording)
 	}
 	if !strings.Contains(recording, "traffic_search") {
@@ -60,20 +60,20 @@ func TestRenderSystemOverrideAndFallback(t *testing.T) {
 	if strings.Contains(recording, "traffic_refs") {
 		t.Fatalf("worker bypassed shared optional evidence policy: %q", recording)
 	}
-	if !strings.Contains(recording, "中间产物输出规约") {
+	if !strings.Contains(recording, "Intermediate-artifact rules") {
 		t.Fatalf("worker missing artifact tail: %q", recording)
 	}
 	// Egress proxy set but capture OFF (no CA): the ProxyAddr template branch still
 	// renders, but the trafficTool block must NOT — those tools are not registered.
 	egressOnly := workerSystem("127.0.0.1:8080", "", "/data", "/data")
-	if !strings.HasPrefix(egressOnly, "走代理 127.0.0.1:8080") {
+	if !strings.HasPrefix(egressOnly, "Use proxy 127.0.0.1:8080") {
 		t.Fatalf("worker egress-only branch body: %q", egressOnly)
 	}
 	if strings.Contains(egressOnly, "traffic_search") {
 		t.Fatalf("worker without recording must NOT inject trafficTool: %q", egressOnly)
 	}
 	noProxy := workerSystem("", "", "/data", "/data")
-	if !strings.HasPrefix(noProxy, "手动") {
+	if !strings.HasPrefix(noProxy, "Manual") {
 		t.Fatalf("worker no-proxy branch body: %q", noProxy)
 	}
 	if strings.Contains(noProxy, "traffic_search") {
@@ -83,12 +83,12 @@ func TestRenderSystemOverrideAndFallback(t *testing.T) {
 
 // langMarker is the unambiguous substring that proves langDirective selected a
 // given display language. These are the native-script tokens embedded in the
-// (Chinese) directive, so finding one means the output-language mandate names that
+// directive, so finding one means the output-language mandate names that
 // language. Used by the directive and role-append tests below.
 var langMarker = map[string]string{
 	"ko": "한국어",
 	"en": "English",
-	"zh": "简体中文",
+	"zh": "Simplified Chinese",
 	"es": "Español",
 }
 
@@ -104,19 +104,19 @@ func TestLangDirectiveLocalized(t *testing.T) {
 		if !strings.Contains(dir, langMarker[code]) {
 			t.Fatalf("%s: langDirective must name the display language (%q), got %q", code, langMarker[code], dir)
 		}
-		if !strings.Contains(dir, "payload") || !strings.Contains(dir, "原样逐字保留") {
+		if !strings.Contains(dir, "payload") || !strings.Contains(dir, "verbatim") {
 			t.Fatalf("%s: langDirective must keep commands/payloads verbatim, got %q", code, dir)
 		}
-		if !strings.Contains(dir, "不要镜像或照抄目标") {
+		if !strings.Contains(dir, "Do not mirror the target") {
 			t.Fatalf("%s: langDirective must forbid mirroring the target/material language, got %q", code, dir)
 		}
-		if !strings.Contains(dir, "态势") {
+		if !strings.Contains(dir, "situation summaries") {
 			t.Fatalf("%s: langDirective must name the planner situation summary as user-facing, got %q", code, dir)
 		}
 		// The anti-Chinese-leak clause applies to every non-Chinese display
 		// language (planner situation-summary drift). When the display language IS
 		// Chinese, Chinese output is correct, so the clause must be absent.
-		hasNoZhClause := strings.Contains(dir, "也绝不能把中文输出给用户")
+		hasNoZhClause := strings.Contains(dir, "Do not output Chinese to the user")
 		if code == "zh" && hasNoZhClause {
 			t.Fatalf("zh: directive must NOT forbid Chinese output when the display language is Chinese, got %q", dir)
 		}

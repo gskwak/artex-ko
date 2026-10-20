@@ -469,7 +469,7 @@ export const assets: Asset[] = [
     params: [{ name: "q", in: "query" }],
     last_seen: T("2026-07-26T02:14:00Z"),
   },
-  // 内网资产（DMZ→内网横向发现）
+  // Internal assets discovered through lateral movement from the DMZ.
   {
     id: 19,
     type: "ip",
@@ -570,9 +570,9 @@ export const assetCounts: Record<string, number> = assets.reduce<Record<string, 
   return m;
 }, {});
 
-// assetRef 把资产 id 变成 finding 上挂的资产引用(label 与后端 coverageNodeLabel
-// 的取值顺序一致:URL > 域名 > IP > 应用名)。「按资产」视图的树就是靠这些引用
-// 把发现挂到资产上的。
+// assetRef converts an asset ID into the reference attached to a finding. Its label
+// follows the backend coverageNodeLabel priority: URL > domain > IP > application name.
+// The "By asset" tree uses these references to attach findings to assets.
 function assetRef(id: number): FindingAsset {
   const asset = assets.find((candidate) => candidate.id === id);
   if (!asset) throw new Error(`mock assetRef: unknown asset ${id}`);
@@ -712,7 +712,7 @@ export const findings: Finding[] = [
     task_description: "shop.acme.com 결제·주문 경로",
     ts: T("2026-07-23T15:00:00Z"),
   },
-  // ── 外网→内网纵深链路上的高危发现（active task）──
+  // ── High-risk findings along the external-to-internal attack chain (active task) ──
   {
     id: "f-11",
     vulnclass: "Hardcoded Credentials",
@@ -819,9 +819,10 @@ export const findings: Finding[] = [
 ];
 
 // ── Exploration graph (active task) ──────────────────────────────────────────
-// 现行模型：根是 fact/state=origin（渲染为「起点」）；payload 为 JSON 字符串，
-// goal 取 text、其余取 summary。结构：根→目标(spawns)→意图(spawns)→事实/漏洞(yields)，
-// 漏洞→目标(proves)，提示→意图(derived_from)。
+// Current model: the root is a fact with state=origin (rendered as "Starting point").
+// Payloads are JSON strings; goals use text and other nodes use summary.
+// Edges: root → goal (spawns) → intent (spawns) → fact/finding (yields);
+// finding → goal (proves); hint → intent (derived_from).
 const P = (o: Record<string, string>) => JSON.stringify(o);
 
 export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
@@ -836,7 +837,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
       ts: T("2026-07-24T09:12:00Z"),
     },
 
-    // ── 目标（由 goals agent 拆解，随发现逐步加码到内网靶标）──
+    // ── Goals (broken down by the goals agent, then extended toward internal targets) ──
     {
       id: "g1",
       type: "goal",
@@ -874,7 +875,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
       ts: T("2026-07-25T20:00:00Z"),
     },
 
-    // ── 第 1 层 · 外网侦察 / 外部漏洞 ──
+    // ── Layer 1: external reconnaissance and vulnerabilities ──
     {
       id: "i1",
       type: "intent",
@@ -930,7 +931,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
       ts: T("2026-07-25T20:20:00Z"),
     },
 
-    // ── 第 2 层 · 突破 DMZ 建立立足点 ──
+    // ── Layer 2: breach the DMZ and establish a foothold ──
     {
       id: "i6",
       type: "intent",
@@ -959,7 +960,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
       ts: T("2026-07-25T16:00:00Z"),
     },
 
-    // ── 第 3 层 · 内网横向纵深（多层测试）──
+    // ── Layer 3: lateral movement through the internal network (multiple stages) ──
     {
       id: "i9",
       type: "intent",
@@ -1006,7 +1007,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
       ts: T("2026-07-25T23:50:00Z"),
     },
 
-    // ── 事实 ──
+    // ── Facts ──
     {
       id: "fa1",
       type: "fact",
@@ -1118,7 +1119,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
       ts: T("2026-07-25T23:20:00Z"),
     },
 
-    // ── 漏洞 ──
+    // ── Findings ──
     {
       id: "fi1",
       type: "finding",
@@ -1201,7 +1202,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
       ts: T("2026-07-26T00:20:00Z"),
     },
 
-    // ── 提示（主 agent 注入）──
+    // ── Hints injected by the main agent ──
     {
       id: "h1",
       type: "hint",
@@ -1231,12 +1232,12 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
     },
   ],
   edges: [
-    // 根 → 目标
+    // Root → goals
     { src: "root", dst: "g1", rel: "spawns" },
     { src: "root", dst: "g2", rel: "spawns" },
     { src: "root", dst: "g3", rel: "spawns" },
     { src: "root", dst: "g4", rel: "spawns" },
-    // 目标 → 意图
+    // Goals → intents
     { src: "g1", dst: "i1", rel: "spawns" },
     { src: "g1", dst: "i2", rel: "spawns" },
     { src: "g1", dst: "i3", rel: "spawns" },
@@ -1251,7 +1252,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
     { src: "g4", dst: "i11", rel: "spawns" },
     { src: "g4", dst: "i12", rel: "spawns" },
     { src: "g4", dst: "i13", rel: "spawns" },
-    // 意图 → 事实 / 漏洞（产出）
+    // Intents → facts / findings (outputs)
     { src: "i1", dst: "fa1", rel: "yields" },
     { src: "i4", dst: "fa2", rel: "yields" },
     { src: "i2", dst: "fi1", rel: "yields" },
@@ -1273,7 +1274,7 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
     { src: "i12", dst: "fa10", rel: "yields" },
     { src: "i12", dst: "fiKerb", rel: "yields" },
     { src: "i13", dst: "fiDC", rel: "yields" },
-    // 事实 → 新意图（事实驱动的多层递进）
+    // Facts → new intents (fact-driven progression)
     { src: "fa3", dst: "i7", rel: "derived_from" },
     { src: "fa4", dst: "i8", rel: "derived_from" },
     { src: "fa4", dst: "i9", rel: "derived_from" },
@@ -1282,11 +1283,11 @@ export const explorationGraph: { nodes: TaskNode[]; edges: Edge[] } = {
     { src: "fa7", dst: "i12", rel: "derived_from" },
     { src: "fa9", dst: "i13", rel: "derived_from" },
     { src: "fa10", dst: "i13", rel: "derived_from" },
-    // 提示 → 意图
+    // Hints → intents
     { src: "h1", dst: "i2", rel: "derived_from" },
     { src: "h2", dst: "i11", rel: "derived_from" },
     { src: "h3", dst: "i10", rel: "derived_from" },
-    // 漏洞 → 证明目标达成
+    // Findings → proof that goals were met
     { src: "fi1", dst: "g1", rel: "proves" },
     { src: "fiRce", dst: "g3", rel: "proves" },
     { src: "fiDC", dst: "g4", rel: "proves" },
@@ -1298,13 +1299,14 @@ export const frontier: TaskNode[] = explorationGraph.nodes.filter(
   (n) => n.type === "intent" && (n.state === "open" || n.state === "running"),
 );
 
-// ── Activity（执行过程）─────────────────────────────────────────────────────
-// 会话由 sessions-tab 从「意图」派生（session.id = intent.id），transcript = 匹配
-// intent_id 的活动流。planner=worker "planner"、主 agent=worker "mainagent"。
-// 每个 worker 会话含完整工具执行链（tool_use → tool_result → …→ result）。
+// ── Activity (execution history) ────────────────────────────────────────────
+// sessions-tab derives sessions from intents (session.id = intent.id). A transcript
+// contains activity entries matching the intent_id. The planner uses worker "planner"
+// and the main agent uses worker "mainagent". Each worker session contains the full
+// tool execution chain (tool_use → tool_result → … → result).
 export const activity: Activity[] = [
-  // planner —— 每轮完整决策链：读态势 → 拉 worker 产出对照 → 判目标 → add_intent 派方向
-  // ── 第 0 轮 · 目标拆解与首批意图（2026-07-24 09:12）──
+  // Planner decision cycle: read status → compare worker output → assess goals → assign intents with add_intent.
+  // ── Cycle 0: break down goals and create the first intents (2026-07-24 09:12) ──
   { seq: 1000, worker: "planner", ts: T("2026-07-24T09:12:10Z"), kind: "round", summary: "라운드 0 · 목표 분해" },
   {
     seq: 1001,
@@ -1368,7 +1370,7 @@ export const activity: Activity[] = [
       "이번 라운드에서 첫 의도 4건을 파생했다. i1 자산 정찰, i2 백오피스 비밀번호, i4 인젝션, i5 API 권한 우회이며, g1 은 i2 로 g2 는 i4/i5 로 가면서 두 목표 모두 독립된 입구를 두고 진행 중이다. worker 가 사실을 산출하면 그 계통에 따라 증원한다.",
   },
 
-  // ── 第 1 轮 · 攻击面加码（2026-07-25 14:12）──
+  // ── Cycle 1: expand the attack surface (2026-07-25 14:12) ──
   { seq: 1100, worker: "planner", ts: T("2026-07-25T14:12:00Z"), kind: "round", summary: "라운드 1 · 공격면 증원" },
   {
     seq: 1101,
@@ -1429,7 +1431,7 @@ export const activity: Activity[] = [
       "상황 격상: 소스 코드 + 하드코딩된 내부망 비밀번호 + Fastjson RCE 가 완전히 새로운 돌파 경로를 구성한다. 목표층에 g3「외부망에서 DMZ 를 돌파해 내부망 거점 확보」를 등록 요청했고, i6(지문/CVE 연관)·i7(RCE 유발)을 파견했다. DMZ 권한 상승 단계는 shell 에 의존하므로 할 일에 기록하고 다음 라운드에 파견한다.",
   },
 
-  // ── 第 2 轮 · 立足点已建，转内网（2026-07-25 20:25）──
+  // ── Cycle 2: pivot internally after establishing a foothold (2026-07-25 20:25) ──
   {
     seq: 1200,
     worker: "planner",
@@ -1513,7 +1515,7 @@ export const activity: Activity[] = [
       "g3 달성, 공격면이 외부망에서 내부망으로 전환됐다. g4「내부망 횡적 이동으로 내부 표적 도메인 컨트롤러 DC01 장악」을 등록 요청했고, i9(호스트 발견) + i10/i11/i12 세 건의 병렬 횡적 이동을 파견했다. 자격 증명 재사용은 faCreds 에 직접 고정한다. 외부망 소스 코드 유출로 얻은 비밀번호를 내부망 횡적 이동에 투입하는 것이다.",
   },
 
-  // ── 第 3 轮 · 靶标达成复盘（2026-07-26 00:25）──
+  // ── Cycle 3: review the completed target (2026-07-26 00:25) ──
   { seq: 1300, worker: "planner", ts: T("2026-07-26T00:25:00Z"), kind: "round", summary: "라운드 3 · 표적 달성 리뷰" },
   {
     seq: 1301,
@@ -1571,7 +1573,7 @@ export const activity: Activity[] = [
       "g4 마무리, 내·외부망 경로가 완전히 뚫렸다(외부망 RCE → DMZ → 내부망 → 도메인 컨트롤러). 미커버 방향을 하나씩 대조한다. g2「사용자 민감 데이터 열람」은 아직 마지막 한 걸음이 부족하지만, 기존 i3(백오피스 사용자 엔드포인트) + i5(API IDOR)가 이미 그 방향을 커버하고 있고 둘 다 running 이다. 이번 라운드에는 【본질적으로 다른 미커버 신규 방향】이 없으므로, 절제 원칙에 따라 신규 의도 0, i3/i5 의 산출을 기다린다.",
   },
 
-  // ── 第 4 轮 · 后台达成，收敛 g2（2026-07-26 03:55）──
+  // ── Cycle 4: complete back-office access and close out g2 (2026-07-26 03:55) ──
   {
     seq: 1400,
     worker: "planner",
@@ -1644,7 +1646,7 @@ export const activity: Activity[] = [
       "g1 달성(4개 중 met 3개: g1/g3/g4). g2 는 정량 인수를 엄격히 지킨다. 백오피스에 진입한 것만으로는 인정되지 않고, 반드시 대량 사용자 데이터를 취득해야 확정한다. i3/i5 를 priority 9 로 올리고 데이터 취득 의도로 구체화했으며, worker 회신이 오면 작업 전체를 마무리할 수 있다.",
   },
 
-  // work#1 · i1 子域枚举与端口扫描（done）
+  // work#1 · i1 subdomain enumeration and port scanning (done)
   {
     seq: 10,
     worker: "work#1",
@@ -1729,7 +1731,7 @@ export const activity: Activity[] = [
     cache_write_tokens: 9000,
   },
 
-  // work#2 · i2 后台默认口令（done，证明 g1）
+  // work#2 · i2 back-office default credentials (done, proves g1)
   {
     seq: 20,
     worker: "work#2",
@@ -1835,7 +1837,7 @@ export const activity: Activity[] = [
     cache_write_tokens: 7200,
   },
 
-  // work#4 · i4 SQL 注入（done）
+  // work#4 · i4 SQL injection (done)
   {
     seq: 40,
     worker: "work#4",
@@ -2002,7 +2004,7 @@ export const activity: Activity[] = [
       "id 범위를 일괄 순회하면서, 권한 우회로 접근 가능한 데이터 규모를 평가하는 중이다(아직 내보내지 않으며, 가로채기 규칙 발동을 피한다).",
   },
 
-  // work#3 · i3 后台用户接口枚举（running）
+  // work#3 · i3 back-office user endpoint enumeration (running)
   {
     seq: 60,
     worker: "work#3",
@@ -2043,7 +2045,7 @@ export const activity: Activity[] = [
       "사용자 데이터를 대량으로 읽는 입구가 존재함을 확인했다. 내보내기 동작이 파괴적/유출 규칙에 걸려, 가로채기 승인을 제출하고 통과를 기다리는 중이다.",
   },
 
-  // workG · ig .git 源码泄露与硬编码凭据（done）
+  // workG · ig .git source disclosure and hard-coded credentials (done)
   {
     seq: 310,
     worker: "workG",
@@ -2131,7 +2133,7 @@ export const activity: Activity[] = [
     cache_write_tokens: 8000,
   },
 
-  // work#6 · i6 shop 指纹与 CVE 关联（done）
+  // work#6 · i6 shop fingerprinting and CVE correlation (done)
   {
     seq: 320,
     worker: "work#6",
@@ -2197,7 +2199,7 @@ export const activity: Activity[] = [
     cache_write_tokens: 6000,
   },
 
-  // work#7 · i7 反序列化 RCE 拿反弹 shell（done，证明 g3）
+  // work#7 · i7 deserialization RCE for a reverse shell (done, proves g3)
   {
     seq: 330,
     worker: "work#7",
@@ -2294,7 +2296,7 @@ export const activity: Activity[] = [
     cache_write_tokens: 12000,
   },
 
-  // work#8 · i8 立足点提权（done）
+  // work#8 · i8 privilege escalation from the foothold (done)
   {
     seq: 340,
     worker: "work#8",
@@ -2369,7 +2371,7 @@ export const activity: Activity[] = [
     cache_write_tokens: 7000,
   },
 
-  // work#9 · i9 内网主机发现（done）
+  // work#9 · i9 internal host discovery (done)
   {
     seq: 350,
     worker: "work#9",
@@ -2413,7 +2415,7 @@ export const activity: Activity[] = [
     cache_write_tokens: 8000,
   },
 
-  // work#10 · i10 内网凭据复用（running）
+  // work#10 · i10 internal credential reuse (running)
   {
     seq: 360,
     worker: "work#10",
@@ -2453,7 +2455,7 @@ export const activity: Activity[] = [
     summary: "FS01 을 장악했고, 공유 디렉터리를 열거해 더 많은 자격 증명과 민감 파일을 찾는 중이다…",
   },
 
-  // work#11 · i11 Jenkins 未授权 RCE（done）
+  // work#11 · i11 unauthenticated Jenkins RCE (done)
   {
     seq: 370,
     worker: "work#11",
@@ -2623,7 +2625,7 @@ export const activity: Activity[] = [
     cache_write_tokens: 10000,
   },
 
-  // work#13 · i13 拿下域控 DC01（done，证明 g4）
+  // work#13 · i13 compromise domain controller DC01 (done, proves g4)
   {
     seq: 390,
     worker: "work#13",
@@ -2719,7 +2721,7 @@ export const activity: Activity[] = [
     cache_write_tokens: 14000,
   },
 
-  // 主 agent（人在环路对话）
+  // Main agent (human-in-the-loop conversation)
   {
     seq: 70,
     worker: "mainagent",
@@ -3065,7 +3067,7 @@ export const llmProfiles: LLMProfile[] = [
     is_default: true,
     priority: 0,
     pool_exclude: false,
-    // anthropic 的字段名固定，故 max_tokens_field 恒为空。
+    // Anthropic uses a fixed field name, so max_tokens_field is always empty.
     max_tokens: 0,
     max_tokens_field: "",
   },
@@ -3084,7 +3086,7 @@ export const llmProfiles: LLMProfile[] = [
     is_default: false,
     priority: 10,
     pool_exclude: false,
-    // openai 格式 + 推理模型：上限走 max_completion_tokens。
+    // OpenAI format with a reasoning model: the limit uses max_completion_tokens.
     max_tokens: 8192,
     max_tokens_field: "max_completion_tokens",
   },
@@ -3211,13 +3213,13 @@ const promptVersions: PromptVersion[] = [
     version: 3,
     ts: T("2026-07-25T10:00:00Z"),
     note: "권한 우회 탐지 유도 강화",
-    template_text: "你是 ARTEX 的规划者……",
+    template_text: "You are ARTEX's planner...",
   },
   {
     version: 2,
     ts: T("2026-07-20T10:00:00Z"),
     note: "초기 버전 미세 조정",
-    template_text: "你是 ARTEX 的规划者(v2)……",
+    template_text: "You are ARTEX's planner (v2)...",
   },
 ];
 
@@ -3225,7 +3227,7 @@ export function agentDetail(key: string): AgentDetail {
   const a = agents.find((x) => x.key === key) ?? agents[1];
   return {
     agent: a,
-    prompt: `你是 ARTEX 的「${a.name}」。\n目标：{{.Goal}}\n资产概览：{{.AssetSummary}}\n路线提示：{{.RouteHint}}\n请基于以上信息推进探索，并通过工具把结果写回图。`,
+    prompt: `You are ARTEX's "${a.name}".\nGoal: {{.Goal}}\nAsset overview: {{.AssetSummary}}\nRoute hint: {{.RouteHint}}\nUse this information to continue the investigation and write the results back to the graph with the available tools.`,
     variables: promptVars,
     versions: promptVersions,
     visibility: { mcp: [1, 2], skill: ["api-recon", "playwright-cli"] },
@@ -3406,8 +3408,9 @@ export const settings: Settings = {
   noa_compaction: false,
 };
 
-// ── LLM 轮询（故障转移）──────────────────────────────────────────────────────
-// demo：激活配置正常，备用配置刚因余额不足熔断，正在冷却。
+// ── LLM pool (failover) ──────────────────────────────────────────────────────
+// Demo: the active profile is healthy; the backup has just tripped its circuit
+// breaker due to insufficient balance and is cooling down.
 export const llmPool: LLMPoolStatus = {
   enabled: true,
   bind_fallback: false,
@@ -3878,7 +3881,7 @@ export const conversationMessages: Record<number, Activity[]> = {
   ],
 };
 
-// ── 资产测试覆盖度（/tasks/{id}/coverage）──
+// ── Asset test coverage (/tasks/{id}/coverage) ──
 export const coverage = {
   enabled: true,
   scope_rows: 4,
@@ -3893,7 +3896,7 @@ export const coverage = {
   ],
 };
 
-// ── 资产覆盖图（/tasks/{id}/coverage-graph）──
+// ── Asset coverage graph (/tasks/{id}/coverage-graph) ──
 export const coverageGraph = {
   nodes: [
     { key: "c:1", kind: "company", label: "Acme Corp", tested: false, in_scope: false, company_id: 1 },
@@ -4021,8 +4024,9 @@ export const coverageGraph = {
   ],
 };
 
-// ── 资产在本任务关联的意图/事实/发现（/tasks/{id}/asset-refs）──
-// 播报板 demo:探索节点 → 其锚定资产。真实后端读 exploration_anchors,mock 里静态给几条。
+// ── Intents, facts, and findings linked to assets in this task (/tasks/{id}/asset-refs) ──
+// Exploration-board demo: nodes → anchored assets. The real backend reads
+// exploration_anchors; the mock defines a few static links.
 const NODE_ASSETS: Record<string, number[]> = {
   fi1: [3],
   fi2: [2, 4],
@@ -4059,7 +4063,7 @@ export function assetRefsFor(_assetId: number) {
   };
 }
 
-// ── 工作空间文件管理器（/workspace/*，demo：静态示例树）──
+// ── Workspace file manager (/workspace/*, demo: static sample tree) ──
 const WS_TREE: Record<string, { name: string; dir: boolean; size: number; content?: string }[]> = {
   "": [
     { name: "t-001", dir: true, size: 0 },
@@ -4128,7 +4132,7 @@ export function workspaceRead(path: string) {
   return { path: key, size: f?.size ?? 0, binary: false, content: f?.content ?? "" };
 }
 
-// ── 工具执行历史（/commands）──
+// ── Tool execution history (/commands) ──
 export const commandRecords = [
   {
     id: 1,
@@ -4182,7 +4186,7 @@ export const commandRecords = [
   },
 ];
 
-// ── LLM 录制（/llm/records、/llm/records/{id}）──
+// ── LLM records (/llm/records, /llm/records/{id}) ──
 export const llmRecords = [
   {
     id: 1,
@@ -4259,8 +4263,8 @@ export function llmRecordDetail(id: number, records = llmRecords) {
     request_body: JSON.stringify(
       {
         model: item.model,
-        system: "你是一个授权渗透测试系统的「执行者」…（省略）",
-        messages: [{ role: "user", content: "开始执行 system 提示里的这条意图：只做它、只产生事实、做完即停。" }],
+        system: "You are the executor in an authorized penetration testing system... (omitted)",
+        messages: [{ role: "user", content: "Execute the intent in the system prompt. Work only on that intent, produce only facts, and stop when done." }],
         tools: ["bash", "insert_assets", "record_fact", "report_finding"],
       },
       null,
@@ -4278,19 +4282,20 @@ export function llmRecordDetail(id: number, records = llmRecords) {
       null,
       2,
     ),
-    // HTTP 原文：请求含被归一化视图丢弃的完整工具 schema，响应为原始 SSE 帧。
+    // Raw HTTP: the request includes full tool schemas omitted by the normalized view;
+    // the response contains the original SSE frames.
     raw_request: JSON.stringify({
       model: item.model,
       max_tokens: 8192,
       stream: true,
       system: [
-        { type: "text", text: "你是一个授权渗透测试系统的「执行者」…（省略）", cache_control: { type: "ephemeral" } },
+        { type: "text", text: "You are the executor in an authorized penetration testing system... (omitted)", cache_control: { type: "ephemeral" } },
       ],
-      messages: [{ role: "user", content: "开始执行 system 提示里的这条意图：只做它、只产生事实、做完即停。" }],
+      messages: [{ role: "user", content: "Execute the intent in the system prompt. Work only on that intent, produce only facts, and stop when done." }],
       tools: [
         {
           name: "bash",
-          description: "在目标环境中执行一条 shell 命令并返回其输出。",
+          description: "Run a shell command in the target environment and return its output.",
           input_schema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
         },
       ],

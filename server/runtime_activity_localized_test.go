@@ -11,8 +11,8 @@ import (
 // node_id 를 달지 않아(작업 단위) 어떤 에이전트 컨텍스트로도 되읽히지 않는다 — 되먹임
 // 경로(planner.workerOutput·get_worker_output 도구)는 intent 범위(node_id)에서 'result'/
 // 'text' 활동만 고르기 때문이다. 그래서 한국어화가 두뇌 입력(BRIEF 경계 #1)을 건드리지
-// 않는다. 반대로 두뇌로 되먹여지는 요약(seed 의도 요약 `完成任务目标…`·기본 설명 `未命名任务`
-// 등)은 원문을 보존하므로 이 테스트 대상이 아니다. 한국어 판정은 assertKoreanError(한글
+// 않는다. 반대로 두뇌로 되먹여지는 요약(seed 의도 요약 `Complete the task goal…`·기본 설명 `Untitled task`
+// 등)은 영어로 작성되어 있으므로 이 테스트 대상이 아니다. 한국어 판정은 assertKoreanError(한글
 // 포함·중국어 한자 0, intercept_archive_localized_test.go)를 재사용한다. [[G132]]
 func TestRuntimeActivitySummariesLocalized(t *testing.T) {
 	// 포맷 인자 없는 고정 요약: 그대로 한국어여야 한다.

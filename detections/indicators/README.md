@@ -2,18 +2,19 @@
 
 English · [한국어](README.ko.md)
 
-> 한국어: [`artex_indicators.csv`](artex_indicators.csv) 는 ARTEX 가 실제로 내보내는 고유 지문(침해지표,
-> IoC)을 한 파일로 모은 것입니다. 위협 인텔리전스 플랫폼·SIEM 조회 테이블·호스트 분류 작업에 바로
-> 넣을 수 있게 기계가 읽는 CSV 로 둡니다. 모든 값은 이 저장소 소스에서 확인한 문자열이며, 각 행의
+> 한국어: [`artex_indicators.csv`](artex_indicators.csv) 는 ARTEX 의 현재 지문(침해지표, IoC)과
+> 과거 가드 마커를 한 파일로 모은 것입니다. 위협 인텔리전스 플랫폼·SIEM 조회 테이블·호스트 분류 작업에 바로
+> 넣을 수 있게 기계가 읽는 CSV 로 둡니다. 현재 값은 이 저장소 소스에서 확인했고, 과거 가드 마커는
+> 이전 감사 로그 탐지를 위해 보존했습니다. 각 행의
 > 출처 파일과 탐지 규칙을 함께 적습니다. 배경 설명은 [방어·탐지 가이드(docs/defense-ko.md)](../../docs/defense-ko.md)
 > 2절 "방어자가 관측할 수 있는 지문"에 있습니다. 자신이 소유하거나 서면 허가를 받은 시스템을 지키는
 > **방어·탐지 목적에만** 사용하십시오. 한국어 전체 문서는 **[README.ko.md](README.ko.md)** 를
 > 보십시오.
 
-A single, machine-readable list of the unique fingerprints ARTEX itself emits, for defenders who want the
-atomic indicators rather than the detection logic: drop [`artex_indicators.csv`](artex_indicators.csv)
+A single, machine-readable list of current ARTEX fingerprints and one historical guard marker, for
+defenders who want the atomic indicators rather than the detection logic: drop [`artex_indicators.csv`](artex_indicators.csv)
 into a threat-intelligence platform, a SIEM lookup table, or a host-triage checklist. Every value is a
-string verified in this repository's source — the same grounding the
+string verified in this repository's source or retained to match older audit logs — the same grounding the
 [detection rules](../README.md) and the defense guide
 ([Korean](../../docs/defense-ko.md) · [English](../../docs/defense-en.md), section 2) rely on — and each
 row records where it comes from and which rule (if any) is built on it.
@@ -24,15 +25,22 @@ row records where it comes from and which rule (if any) is built on it.
 - **`type`** — the kind of indicator: `http.user-agent`, `string` (a literal to hunt for in logs/files),
   `port`, `ip-dst|port`, or `other` (a host artifact that fits none of the above, e.g. a database schema
   object name). These map onto the equivalent MISP/STIX attribute types.
-- **`value`** — the exact indicator. Preserved verbatim, including the non-ASCII guard marker.
+- **`value`** — the exact indicator, preserved verbatim for matching.
 - **`perspective`** — `target` (observable in traffic *toward* a system ARTEX probes) or `forensic`
   (observable *on* a host where ARTEX ran or was relayed through). The defense guide keeps these apart on
   purpose; mixing them produces false conclusions.
-- **`source`** — the repository-relative source file(s) that emit the value, `;`-separated. This is the
-  grounding: if an upstream re-sync changes the emitter, the indicator here must change with it.
+- **`source`** — the repository-relative source file(s) associated with the value, `;`-separated. For
+  current indicators these files emit the value; the legacy guard row cites its former emitter. If an
+  upstream re-sync changes a current emitter, its indicator must change with it.
 - **`rule`** — the detection rule(s) built on the exact value, `;`-separated, or empty for host-forensic
   indicators that are triaged directly rather than shipped as a (noisy) rule.
 - **`description`** — a one-line note, including the honest caveat where one applies.
+
+The current audit-log marker is `[ARTEX platform policy; not a target-side defense]`. The separate
+`guard-audit-marker-legacy` row retains `【ARTEX 平台管控·非目标防御】` so searches and imports also cover
+historical logs. ARTEX now emits the English marker; the Chinese marker is a backward-compatibility
+indicator, not a claim about current output. The [Sigma rule](../sigma/artex_guard_audit_framing.yml)
+and [host-triage script](../triage/artex_host_triage.py) match both values.
 
 ## MISP event export
 
@@ -93,9 +101,10 @@ repository does not hand-roll a second, lossy format.
 ## Verification
 
 The list is covered by the [indicator source-of-truth test](../tests/indicators/run.sh): it re-reads this
-CSV and asserts, for every row, that the value is still present in the cited source file(s) and pinned in
-the cited rule(s), and that every indicator the test grounds appears in the list. A row that drifts from
-the source, or a known fingerprint dropped from the list, fails the test. Run it with:
+CSV and checks that current values remain in the cited emitters, the legacy marker remains documented
+as a historical value, and both markers remain pinned in the detection rule. It also checks that each
+grounded indicator appears in the list. A drifted current value or a dropped historical marker fails
+the test. Run it with:
 
 ```sh
 detections/tests/indicators/run.sh

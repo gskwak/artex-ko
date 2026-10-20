@@ -1,6 +1,6 @@
-// Mock 路由：把 (method, path) 映射到 lib/mock/data 的静态数据。
-// 未命中的一律返回安全默认（[] / {} / {ok:true}），保证任何页面都不崩。
-// 只在 NEXT_PUBLIC_MOCK=1 时经由 api.ts 的 http() 短路进入这里。
+// Mock routes map (method, path) to static data from lib/mock/data.
+// Unmatched routes return safe defaults ([] / {} / {ok:true}) so pages do not crash.
+// api.ts routes http() calls here only when NEXT_PUBLIC_MOCK=1.
 
 import {
   classifyCompanyScopeLine,
@@ -52,10 +52,12 @@ const mockConversations = structuredClone(D.conversations);
 const mockRetests: FindingRetest[] = [];
 const mockRetestMessages: Record<number, Activity[]> = {};
 
-// ── 关联流量证据(finding traffic) ─────────────────────────────────────────────
-// 后端把请求/响应快照独立存到 evidence 表,前端详情页用 FindingTrafficPanel 展示。
-// demo 里为部分漏洞预置绑定,快照直接引用 mock 抓包(data.traffic.exchanges),
-// 其余漏洞返回空绑定。缺了这套路由,详情页会因读到空对象、访问 bindings.length 崩整页。
+// ── Finding traffic evidence ─────────────────────────────────────────────────
+// The backend stores request/response snapshots separately in the evidence table;
+// the frontend detail page displays them with FindingTrafficPanel.
+// The demo seeds bindings for some findings using mock captures in data.traffic.exchanges.
+// Other findings have no bindings. Without these routes, the detail page would try
+// to access bindings.length on an empty object and crash.
 const mockExchangeById = new Map((D.traffic.exchanges ?? []).map((exchange) => [exchange.id, exchange]));
 
 interface MockBindingSeed {
@@ -64,8 +66,8 @@ interface MockBindingSeed {
   note?: string;
 }
 
-// 每条漏洞预置的流量证据(finding id → 绑定的抓包)。选取与漏洞语义对应的请求,
-// 让 demo 详情页的「关联流量」区块看起来真实。
+// Seeded traffic evidence for each finding (finding ID → bound capture). Choose
+// requests that match the finding so the demo's linked traffic section looks realistic.
 const mockFindingTrafficSeeds: Record<string, MockBindingSeed[]> = {
   "f-1": [{ traffic_id: "x-2", role: "proof", note: "q 파라미터 인젝션 payload 로 응답에 MSSQL 오류가 에코됐다." }],
   "f-2": [
@@ -89,7 +91,7 @@ const mockFindingTrafficSeeds: Record<string, MockBindingSeed[]> = {
   ],
 };
 
-// demo 用固定报文正文,避免详情页 Request/Response 空白。
+// Use fixed message bodies in the demo so Request/Response details are not blank.
 const mockEvidenceBodies: Record<string, { req: string; resp: string }> = {
   "x-2": {
     req: "q=1' AND 1=CONVERT(int,@@version)--",
@@ -110,7 +112,8 @@ const mockEvidenceBodies: Record<string, { req: string; resp: string }> = {
   "x-19": { req: "[psexec] acme/svc_deploy@10.10.10.10", resp: "[*] Got SYSTEM on DC01" },
 };
 
-// 运行期状态:finding id → 绑定列表(可增删改序,demo 内存态)。首次访问按种子初始化。
+// Runtime state: finding ID → bindings (mutable and reorderable in demo memory).
+// Initialize from the seeds on first access.
 const mockFindingTraffic: Record<string, FindingTrafficBinding[]> = {};
 const mockFindingTrafficVersion: Record<string, number> = {};
 let mockBindingSeq = 900;
@@ -122,7 +125,7 @@ function mockBuildSnapshot(trafficId: string): TrafficEvidenceSnapshot {
   try {
     if (exchange) pathAndQuery = new URL(exchange.url).pathname + new URL(exchange.url).search;
   } catch {
-    // 保底用根路径。
+    // Fall back to the root path.
   }
   const body = mockEvidenceBodies[trafficId];
   return {
@@ -164,7 +167,7 @@ function mockTrafficSummary(findingID: string): FindingTraffic {
   const bindings = mockTrafficBindings(findingID).map((binding, index) => ({
     ...binding,
     position: index,
-    // 列表/摘要接口剥掉报文头,与后端 trafficSummary 一致。
+    // Omit message headers from list/summary responses, as backend trafficSummary does.
     snapshot: { ...binding.snapshot, req_head: "", resp_head: "" },
   }));
   const version = mockFindingTrafficVersion[findingID] ?? 1;
@@ -476,8 +479,9 @@ function mockAssetMatchesDSL(asset: Asset, dsl: string): boolean {
   return query.split(/\s+/).every((term) => haystack.includes(term));
 }
 
-// mockFilterFindings 应用发现页的公共筛选(严重度/状态/类型/任务/关键词),资产
-// 子树筛选另走 mockApplyAssetScope —— 与后端 FindingFilter.where() 的分工一致。
+// mockFilterFindings applies shared finding filters (severity, status, type, task,
+// and keyword). mockApplyAssetScope handles asset subtree filters separately,
+// mirroring the split in backend FindingFilter.where().
 function mockFilterFindings(q: URLSearchParams): (typeof mockFindings)[number][] {
   let list = mockFindings.filter((finding) => mockFindingMatchesQuery(finding, q.get("q")));
   const severity = q.get("severity");
@@ -502,15 +506,17 @@ function mockFindingMatchesQuery(finding: (typeof mockFindings)[number], query: 
   );
 }
 
-// ── 「按资产」视图 ────────────────────────────────────────────────────────────
-// 后端把树建在 db/finding_assets.go 里(只收有发现的资产 + 逐层补齐祖先,计数沿
-// 祖先链去重累加)。这里用同一套父子优先级在内存里重放一遍,让 demo 模式的层级、
-// 计数、子树筛选与真后端保持一致。
+// ── By asset view ─────────────────────────────────────────────────────────────
+// The backend builds this tree in db/finding_assets.go: include only assets with
+// findings, add their ancestors level by level, and count each finding once per
+// ancestor. Replay the same parent precedence in memory so the demo's hierarchy,
+// counts, and subtree filters match the backend.
 
 const UNASSIGNED_ASSET = "__none__";
 
 function mockAssetLabel(asset: (typeof mockAssets)[number]): string {
-  // 没有 URL 的服务补端口,否则标签会和宿主 IP/域名那行完全一样(与后端一致)。
+  // Add the port for services without a URL; otherwise their label would match
+  // the host IP/domain label exactly (as in the backend).
   if (asset.type === "service" && !asset.url) {
     const host = asset.domain || asset.ip;
     if (host && asset.port) return `${host}:${asset.port}`;
@@ -518,7 +524,7 @@ function mockAssetLabel(asset: (typeof mockAssets)[number]): string {
   return asset.url || asset.domain || asset.ip || asset.app_name || `#${asset.id}`;
 }
 
-// mockAssetHost 与后端 hostPortOf 一致:优先 domain,其次 URL 里的 host,最后 ip。
+// Like backend hostPortOf, mockAssetHost prefers domain, then URL host, then IP.
 function mockAssetHost(asset: (typeof mockAssets)[number]): { host: string; port: number } {
   let host = asset.domain ?? "";
   let port = asset.port ?? 0;
@@ -528,7 +534,7 @@ function mockAssetHost(asset: (typeof mockAssets)[number]): { host: string; port
       host = url.hostname.replace(/^\[|\]$/g, "");
       if (!port) port = Number(url.port) || (url.protocol === "https:" ? 443 : 80);
     } catch {
-      // 非法 URL 就退回 ip。
+      // Fall back to IP when the URL is invalid.
     }
   }
   if (!host) host = asset.ip ?? "";
@@ -551,14 +557,15 @@ interface MockAssetTreeNode {
   last_found_at: string;
 }
 
-// mockBuildAssetTree 从一批(已按其它条件筛过的)发现构建资产树。
+// Build an asset tree from findings already filtered by other criteria.
 function mockBuildAssetTree(list: (typeof mockFindings)[number][]): MockAssetTreeNode[] {
   const hit = new Set<number>();
   for (const finding of list) {
     for (const ref of finding.assets ?? []) hit.add(Number(ref.id));
   }
 
-  // 收集命中的资产 + 逐层补齐祖先(宿主 service / 子域名 / IP / 根域名)。
+  // Collect matching assets and add ancestors level by level (host service,
+  // subdomain, IP, or root domain).
   const picked = new Map<number, (typeof mockAssets)[number]>();
   for (const asset of mockAssets) if (hit.has(asset.id)) picked.set(asset.id, asset);
   for (let round = 0; round < 4; round++) {
@@ -606,7 +613,7 @@ function mockBuildAssetTree(list: (typeof mockFindings)[number][]): MockAssetTre
     });
   }
 
-  // 父子关系:与 db/finding_assets.go 的 firstOf 优先级顺序一致。
+  // Parent relationships follow the firstOf precedence in db/finding_assets.go.
   const find = (predicate: (a: (typeof mockAssets)[number]) => boolean) => {
     const asset = [...picked.values()].find(predicate);
     return asset ? key(asset.id) : "";
@@ -640,7 +647,8 @@ function mockBuildAssetTree(list: (typeof mockFindings)[number][]): MockAssetTre
     }
   }
 
-  // 企业层:只给确实有归属的顶层资产(根域名 / IP / 应用)补,没有归属就自己是顶层。
+  // Add a company above top-level root domains, IPs, and apps only when an
+  // owning company exists. Otherwise the asset remains top-level.
   for (const node of [...nodes.values()]) {
     if (node.parent || !node.company_id) continue;
     if (!["root_domain", "ip", "app"].includes(node.kind)) continue;
@@ -666,7 +674,8 @@ function mockBuildAssetTree(list: (typeof mockFindings)[number][]): MockAssetTre
     parentOf.set(node.key, companyKey);
   }
 
-  // 计数:一条发现沿它每个资产的祖先链向上,收集去重后的 key 集合再逐个 +1。
+  // For each finding, gather unique keys along every asset's ancestor chain,
+  // then increment each node's count once.
   const unassigned: MockAssetTreeNode = {
     key: UNASSIGNED_ASSET,
     kind: "none",
@@ -714,8 +723,9 @@ function mockBuildAssetTree(list: (typeof mockFindings)[number][]): MockAssetTre
   return out;
 }
 
-// mockAssetScopeIds 把资产树节点 key 展开成整棵子树的资产 id 集合,与后端
-// applyAssetScope 同义。miss=true 表示该节点在当前筛选下不存在 → 结果恒空。
+// Expand an asset tree node key to IDs for its entire subtree, matching backend
+// applyAssetScope. miss=true means the node is absent under the current filters,
+// so the result is always empty.
 function mockAssetScopeIds(
   scope: string,
   list: (typeof mockFindings)[number][],
@@ -744,8 +754,8 @@ function mockAssetScopeIds(
   return { ids, none: false, miss: ids.size === 0 };
 }
 
-// mockApplyAssetScope 按 asset_scope 收窄一批发现。「未关联」同时收 assets 为空
-// 与指向已删资产的发现,和树上那个桶的口径一致。
+// Narrow findings by asset_scope. The unassigned bucket includes findings with
+// no assets and findings that reference deleted assets, matching the tree.
 function mockApplyAssetScope(
   list: (typeof mockFindings)[number][],
   scope: string | null,
@@ -831,7 +841,7 @@ function mockProfileResolution(profileID: number | undefined, source: TaskLLMRes
 }
 
 // Mirrors the backend precedence in server/task_resolution.go:
-// Agent 绑定 → 任务 LLM 配置链 → 全局配置 → 环境配置。
+// Agent binding → task LLM configuration chain → global configuration → environment configuration.
 function mockRoleResolution(task: Task, agentKey: "mainagent" | "planner" | "worker"): TaskLLMResolution {
   const agent = D.agents.find((item) => item.key === agentKey);
   if (agent?.llm_profile_id) {
@@ -1073,7 +1083,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     };
   }
 
-  // ── auth：让 demo 直接进主界面 ──
+  // ── Auth: let the demo enter the main UI directly ──
   if (path === "/auth/status") return { initialized: true };
   if (path === "/auth/login" || path === "/auth/init") return { token: "mock-demo" };
   if (path === "/auth/change-password") return { ok: true };
@@ -1485,7 +1495,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       }
       const numId = Number(id.replace(/\D/g, "")) || 0;
       if (b.mode === "hard") {
-        // 真删除:从列表移除,返回级联删除计数。
+        // Hard delete: remove from the list and return the cascade deletion count.
         mockIntents.splice(index, 1);
         return {
           id: numId,
@@ -1498,7 +1508,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
           },
         };
       }
-      // 假删除(默认):置 deleted + 记删除原因,保留节点。
+      // Soft delete (default): mark deleted and record the reason, keeping the node.
       intent.state = "deleted";
       intent.delete_reason = String(b.reason ?? "");
       return { id: numId, state: "deleted" };
@@ -1537,12 +1547,12 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     return { active: mockActiveTask };
   }
 
-  // ── 覆盖度 / 覆盖图 / 资产关联（任务维度）──
+  // ── Coverage / coverage graph / asset associations (per task) ──
   if (seg[0] === "tasks" && seg[2] === "coverage" && seg.length === 3) return D.coverage;
   if (seg[0] === "tasks" && seg[2] === "coverage-graph") return D.coverageGraph;
   if (seg[0] === "tasks" && seg[2] === "asset-refs") return D.assetRefsFor(Number(q.get("asset_id") ?? 0));
 
-  // ── 任务测试范围（增删查）──
+  // ── Task test scope (create, delete, read) ──
   if (seg[0] === "tasks" && seg[2] === "scope" && seg.length === 3 && m === "GET") {
     return { scope: mockTaskScopes.get(seg[1]) ?? [] };
   }
@@ -1571,7 +1581,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     return { ok: true };
   }
 
-  // ── 全局 llm_usage 聚合（仪表盘新版视图，demo）──
+  // ── Global llm_usage aggregation (new dashboard view, demo) ──
   if (path === "/tokens/usage")
     return {
       by_profile: [
@@ -1610,7 +1620,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       ],
     };
 
-  // ── 按模型 token 用量（demo：一条示例）──
+  // ── Token usage by model (one demo example) ──
   if (path === "/llm/records/by-model")
     return {
       models: [
@@ -1633,7 +1643,8 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       ],
     };
 
-  // ── 工作空间文件管理器（demo：静态示例树；写/建/删走下方写兜底 {ok:true}）──
+  // ── Workspace file manager (static demo tree; writes, creates, and deletes
+  // fall through to the {ok:true} write handler below) ──
   if (path === "/workspace/list") return D.workspaceList(q.get("path") ?? "");
   if (path === "/workspace/read") return D.workspaceRead(q.get("path") ?? "");
 
@@ -1878,7 +1889,8 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (path === "/exploration/frontier") return D.frontier;
   if (path === "/exploration/findings/stats") {
     const vulnclasses = Array.from(new Set(mockFindings.map((f) => f.vulnclass))).sort();
-    // 「按任务」下拉:有漏洞的任务 + 描述 + 条数(mock 任务 id 是字符串,直接当 id 用)。
+    // By task dropdown: tasks with findings, descriptions, and counts.
+    // Mock task IDs are strings and can be used directly.
     const taskMap = new Map<string, { name: string; description: string; count: number }>();
     for (const f of mockFindings) {
       if (!f.task_id) continue;
@@ -2033,7 +2045,8 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       queued: false,
     };
   }
-  // 关联流量证据:列表 / 绑定 / 编辑 / 解绑 / 排序 / 单条报文详情(demo 内存态)。
+  // Linked traffic evidence: list, bind, edit, unbind, sort, and individual
+  // message details (held in demo memory).
   // seg = ["exploration","findings",<id>,"traffic", ...]
   if (seg[0] === "exploration" && seg[1] === "findings" && seg[3] === "traffic") {
     const findingID = seg[2];
@@ -2043,7 +2056,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       mockFindingTrafficVersion[findingID] = (mockFindingTrafficVersion[findingID] ?? 1) + 1;
     };
 
-    // 单条报文详情:GET /traffic/{binding_id}
+    // Individual message details: GET /traffic/{binding_id}
     if (seg.length === 5 && seg[4] !== "order" && m === "GET") {
       const binding = bindings.find((item) => item.id === seg[4]);
       if (!binding) throw new Error("증거를 찾을 수 없습니다");
@@ -2054,7 +2067,8 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
         response: mockEvidencePreview(body.resp),
       };
     }
-    // 报文正文分页:GET /traffic/{binding_id}/body —— demo 正文不截断,直接返回空续页。
+    // Message body pagination: GET /traffic/{binding_id}/body. Demo bodies are
+    // never truncated, so return an empty continuation page.
     if (seg.length === 6 && seg[5] === "body" && m === "GET") {
       const binding = bindings.find((item) => item.id === seg[4]);
       if (!binding) throw new Error("증거를 찾을 수 없습니다");
@@ -2062,7 +2076,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       const side = q.get("side") === "request" ? body.req : body.resp;
       return mockEvidencePreview(side);
     }
-    // 绑定流量:POST /traffic
+    // Bind traffic: POST /traffic
     if (seg.length === 4 && m === "POST") {
       const refs = Array.isArray(b.traffic_refs) ? (b.traffic_refs as MockBindingSeed[]) : [];
       for (const ref of refs) {
@@ -2081,14 +2095,14 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       bumpVersion();
       return mockTrafficSummary(findingID);
     }
-    // 排序:PUT /traffic/order
+    // Reorder: PUT /traffic/order
     if (seg.length === 5 && seg[4] === "order" && m === "PUT") {
       const order = Array.isArray(b.binding_ids) ? (b.binding_ids as string[]) : [];
       bindings.sort((left, right) => order.indexOf(left.id) - order.indexOf(right.id));
       bumpVersion();
       return mockTrafficSummary(findingID);
     }
-    // 编辑说明 / 解绑:PATCH|DELETE /traffic/{binding_id}
+    // Edit note / unbind: PATCH|DELETE /traffic/{binding_id}
     if (seg.length === 5 && (m === "PATCH" || m === "DELETE")) {
       const index = bindings.findIndex((item) => item.id === seg[4]);
       if (index < 0) throw new Error("증거를 찾을 수 없습니다");
@@ -2101,10 +2115,11 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       bumpVersion();
       return mockTrafficSummary(findingID);
     }
-    // 列表:GET /traffic
+    // List: GET /traffic
     return mockTrafficSummary(findingID);
   }
-  // 单条 finding:GET 详情 / PATCH 改状态/严重度/名称/类别(demo 直接改内存对象)。
+  // Single finding: GET details / PATCH status, severity, name, or category
+  // (directly mutate the demo's in-memory object).
   if (seg[0] === "exploration" && seg[1] === "findings" && seg.length === 3 && seg[2] !== "stats") {
     const f = mockFindings.find((x) => x.id === seg[2]);
     if (!f) return {};
@@ -2130,8 +2145,9 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     };
   }
   if (path === "/exploration/findings") {
-    // finding_id=id：真后端用独立表行 id 作为状态/详情句柄,mock 里用自身 id 顶上。
-    // report 仅详情接口返回,列表剥掉(与后端一致)。
+    // The backend uses a separate table row ID to address finding status/details;
+    // the mock uses the finding's own ID instead.
+    // Return report only from the detail endpoint; omit it from lists, as the backend does.
     const withFid = (f: (typeof mockFindings)[number]) => ({
       ...f,
       report: undefined,
@@ -2148,7 +2164,8 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
           ...(f.task_id !== task ? { inherited: true, source_task_id: f.task_id } : {}),
         }));
     }
-    // 全局:带 page/limit → 分页对象;否则裸数组(dashboard)。
+    // Global view: page/limit returns a paginated object; otherwise return a
+    // bare array for the dashboard.
     if (!q.has("page") && !q.has("limit")) return mockFindings.map(withFid);
     const sev = { critical: 4, high: 3, medium: 2, low: 1 } as const;
     const list = mockApplyAssetScope(mockFilterFindings(q), q.get("asset_scope"));
@@ -2187,8 +2204,9 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     };
   }
   if (path === "/exploration/graph") return D.explorationGraph;
-  // 播报板:和后端 /exploration/nodes 同语义 —— 按创建顺序(mock 里用 ts + id)分页,
-  // 并带上这一页涉及的边与边另一端的节点。
+  // Exploration board: match backend /exploration/nodes semantics. Paginate by
+  // creation order (ts + id in the mock), including related edges and their
+  // nodes at the other end.
   if (path === "/exploration/nodes") {
     const all = D.explorationGraph.nodes;
     const kinds = new Set((q.get("kind") ?? "").split(",").filter(Boolean));
@@ -2203,7 +2221,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       .filter(
         (n) =>
           !needle ||
-          // 内容 / 来源 / 节点 id 任一命中即可(id 兼容「#41」写法)。
+          // Match content, source, or node ID (including the #41 form).
           `${n.payload ?? ""} ${n.origin} ${n.id}`.toLowerCase().includes(needle.replace(/^#/, "")),
       )
       .sort((a, b) => {
@@ -2221,7 +2239,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
         if (node) refs[id] = node;
       }
     }
-    // 顺带带上本页节点(含邻居)锚定的资产,供展开时展示。
+    // Include assets anchored to page nodes and neighbors for expanded display.
     const assets: Record<string, ReturnType<typeof D.nodeAssetsFor>> = {};
     for (const id of new Set([...onPage, ...Object.keys(refs)])) {
       const anchored = D.nodeAssetsFor(id);
@@ -2257,7 +2275,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     return { reply: "(demo) 해당 제안을 고우선순위 의도로 주입했습니다. work agent 가 곧 실행합니다.", mode: "hint" };
   if (path === "/gc") return { removed: 0 };
 
-  // ── 工具执行历史 ──
+  // ── Tool execution history ──
   if (path === "/commands" && m === "GET") return { commands: D.commandRecords, total: D.commandRecords.length };
   if (path === "/commands/stats" && m === "GET") {
     const tally = new Map<string, { tool: string; total: number; errors: number }>();
@@ -2409,7 +2427,7 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
   if (seg[0] === "mcp" && seg[2] === "refresh") return { tools: D.mcpToolsById[Number(seg[1])] ?? [] };
   if (seg[0] === "mcp" && seg.length === 2 && m === "DELETE") return { deleted: Number(seg[1]) };
 
-  // ── scopesentry（demo：未配置）──
+  // ── Scopesentry (unconfigured in demo) ──
   if (path === "/sync/scopesentry/status")
     return { exists: false, configured: false, enabled: false, reachable: false, tools: [] };
   if (path === "/sync/scopesentry/projects") return { projects: [], tag: {} };
@@ -2499,17 +2517,18 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
     };
   if (path === "/intercept/judge" && m === "PUT") return { ok: true };
 
-  // ── 旁路提问(/btw)：demo 无旁路会话 ──
-  // 必须显式命中：路径以 s 结尾会被下面的读兜底判成集合返回 []，items 就成了 undefined。
+  // ── Side questions (/btw): no side sessions in the demo ──
+  // Match explicitly: the read fallback below treats paths ending in s as
+  // collections and returns [], which would leave items undefined.
   if (seg.at(-1) === "side-questions") {
     if (m === "GET") return { items: [], current: null, next_cursor: 0, snapshot: null };
     if (m === "POST") throw new Error("데모 모드에서는 곁질문을 지원하지 않습니다");
   }
 
-  // ── 写操作兜底：成功但不落库 ──
+  // ── Write fallback: succeed without persisting ──
   if (["POST", "PUT", "PATCH", "DELETE"].includes(m)) return { ok: true };
 
-  // ── 读兜底：集合类给 []，其余 {} ──
+  // ── Read fallback: [] for collections, {} otherwise ──
   return /(\/(tasks|profiles|conversations|rules|history|projects|tokens|agents|servers|skills|tools|findings|intents)s?$)|s$/.test(
     path,
   )

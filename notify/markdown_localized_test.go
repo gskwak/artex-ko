@@ -27,7 +27,7 @@ func hanFreeItems(n int) []Item {
 // 공유하는 feishu·html·telegram·webhook 이 함께 쓰는 markdownTitle 이 한국어인지
 // 검사한다. 하나라도 중국어로 되돌아가면 이 다섯 채널의 제목이 전부 혼재된다.
 func TestMarkdownTitleLocalized(t *testing.T) {
-	// 다건(汇总): "취약점 요약 · 총 N건"
+	// 다건 요약: "취약점 요약 · 총 N건"
 	got := markdownTitle(Message{Batch: true, Items: hanFreeItems(3)})
 	assertKorean(t, "markdownTitle(batch)", got)
 	if !strings.Contains(got, "취약점 요약") || !strings.Contains(got, "총 3건") {

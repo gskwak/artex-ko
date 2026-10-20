@@ -94,7 +94,8 @@ const GROUP_MESSAGE_KEY: Record<number, string> = { 1: "function", 2: "system" }
 export function NavMain({ items }: NavMainProps) {
   const t = useTranslations("nav");
   const rawPath = usePathname();
-  // 路由段含中文，pathname 可能是百分号编码，解码后再与导航 url 比较，保证高亮命中。
+  // Route segments may contain Chinese characters and be percent-encoded in pathname.
+  // Decode before comparing with the navigation URL so the active item is highlighted.
   const path = (() => {
     try {
       return decodeURIComponent(rawPath);

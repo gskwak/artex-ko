@@ -80,11 +80,19 @@ INDICATORS = [
     },
     {
         "label": "platform-guard audit framing marker",
-        "value": "【ARTEX 平台管控·非目标防御】",
+        "value": "[ARTEX platform policy; not a target-side defense]",
         "sources": ["guard/guard.go"],
         "rules": ["detections/sigma/artex_guard_audit_framing.yml"],
     },
 ]
+
+# Older ARTEX releases emitted this byte sequence. It remains a published
+# forensic indicator and Sigma keyword, although current guard/guard.go emits
+# the English replacement and no longer contains these historical bytes.
+LEGACY_GUARD_MARKER = "【ARTEX 平台管控·非目标防御】"
+LEGACY_GUARD_ID = "guard-audit-marker-legacy"
+LEGACY_GUARD_SOURCE = "guard/guard.go"
+LEGACY_GUARD_RULE = "detections/sigma/artex_guard_audit_framing.yml"
 
 # --- generic destructive-command hunting leads -------------------------------
 # NOT unique ARTEX fingerprints. These tokens are shared with ARTEX's own guard
@@ -168,6 +176,10 @@ for ind in INDICATORS:
             bad("rule file missing: %s" % rfile)
         else:
             bad("%s no longer pins prefix %r" % (rfile, prefix))
+if contains(LEGACY_GUARD_RULE, LEGACY_GUARD_MARKER) is True:
+    ok("%s retains legacy guard marker" % LEGACY_GUARD_RULE)
+else:
+    bad("%s no longer detects legacy guard marker" % LEGACY_GUARD_RULE)
 
 print("== 3/5  destructive hunting tokens match ARTEX's guard deny-list ==")
 src, rule, tokens = DENYLIST["source"], DENYLIST["rule"], DENYLIST["tokens"]
@@ -227,6 +239,13 @@ else:
                 hit = contains(s, value)
                 if hit is True:
                     ok("%s: %r grounded in %s" % (rid, value, s))
+                elif (hit is False and rid == LEGACY_GUARD_ID and value == LEGACY_GUARD_MARKER
+                      and s == LEGACY_GUARD_SOURCE
+                      and rec["rule"] == LEGACY_GUARD_RULE
+                      and rec["perspective"] == "forensic"):
+                    # Historical bytes are absent from the current emitter.
+                    # Keep this exception exact so other source drift fails.
+                    ok("%s: historical marker retained for earlier logs" % rid)
                 elif hit is None:
                     bad("%s: row %r source file missing: %s" % (CSV_REL, rid, s))
                 else:
@@ -247,6 +266,11 @@ else:
                 ok("tested fingerprint %r is published in the list" % ind["value"])
             else:
                 bad("tested fingerprint %r is missing from %s" % (ind["value"], CSV_REL))
+        if any(rec["id"] == LEGACY_GUARD_ID and rec["value"] == LEGACY_GUARD_MARKER
+               for rec in csv_rows):
+            ok("legacy guard marker is published with its historical row ID")
+        else:
+            bad("legacy guard marker is missing from %s" % CSV_REL)
 
 
 def paths_for_trigger(text, trigger):

@@ -15,8 +15,8 @@ import (
 // fmt.Errorf 2곳, ② F34: writeErr 를 거치지 않는 사용자 노출 5곳(chatUnavailableReason
 // 의 return 3종 + testLLM·웹 검색 프로브의 writeJSON error 2종), ③ F34(d): 규칙 모드
 // 채팅 fallbackChat 의 응답 3종(확인 2종 + 현황 요약)과 한국어 트리거 별칭(의도/힌트) 인식
-// 이다. 에이전트에 전달되는 프롬프트·도구 설명·seed 의도 요약·기본 제목(未命名任务)·로그는
-// 원문 보존이라 이 테스트의 대상이 아니다.
+// 이다. 에이전트에 전달되는 프롬프트·도구 설명·seed 의도 요약·기본 제목(Untitled task)·로그는
+// 영어로 작성되어 있어 이 테스트의 대상이 아니다.
 
 // TestServerErrorConstantsLocalized 는 응답 상수 전부가 한국어임을 단언한다. 형식 문자열
 // 상수(%d 포함)는 실제 포매팅한 결과로도 함께 검사해, 치환값이 들어가도 한국어가 깨지지

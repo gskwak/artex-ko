@@ -23,6 +23,20 @@ func TestChatMentionParsing(t *testing.T) {
 	if err != nil || len(refs) != 2 || refs[0].Kind != "finding" || refs[1].ID != 34 {
 		t.Fatalf("refs=%+v err=%v", refs, err)
 	}
+	english := "@[finding#1] @[asset#2] @[company#3] @[endpoint#4] @[IP#5] @[application#6] @[root domain#7] @[subdomain#8] @[service#9]"
+	refs, err = parseChatMentions(english)
+	if err != nil || len(refs) != 9 {
+		t.Fatalf("English mention refs=%+v err=%v", refs, err)
+	}
+	for i, kind := range []string{"finding", "asset", "company", "endpoint", "ip", "app", "root_domain", "subdomain", "service"} {
+		if refs[i].Kind != kind || refs[i].ID != int64(i+1) {
+			t.Fatalf("English mention %d = %+v, want kind %s", i, refs[i], kind)
+		}
+	}
+	refs, err = parseChatMentions("@[finding#12] @[漏洞#12]")
+	if err != nil || len(refs) != 1 {
+		t.Fatalf("legacy and English aliases should resolve to one record: %+v %v", refs, err)
+	}
 	for _, msg := range []string{"@[漏洞#0]", "@[漏洞#999999999999999999999999]"} {
 		if _, err := parseChatMentions(msg); err == nil {
 			t.Fatalf("accepted %q", msg)
@@ -177,7 +191,7 @@ func TestChatMentionWorkerReceivesServerDetails(t *testing.T) {
 	select {
 	case req := <-requests:
 		blob, _ := json.Marshal(req.Messages)
-		if !strings.Contains(string(blob), "worker-hidden-proof") || !strings.Contains(string(blob), "用户引用的记录快照") {
+		if !strings.Contains(string(blob), "worker-hidden-proof") || !strings.Contains(string(blob), "Snapshot of records referenced by the user") {
 			t.Fatalf("worker missing reference details: %s", blob)
 		}
 	case <-time.After(5 * time.Second):
@@ -213,7 +227,7 @@ func TestChatMentionBoundedJSON(t *testing.T) {
 		items[i] = long
 	}
 	v := boundChatMentionValue(map[string]any{"report": long, "scope": items}).(map[string]any)
-	if !strings.Contains(v["report"].(string), "已截断") || len(v["scope"].([]any)) != 101 {
+	if !strings.Contains(v["report"].(string), "truncated") || len(v["scope"].([]any)) != 101 {
 		t.Fatal("missing truncation markers")
 	}
 	encoded, err := json.Marshal(v)
@@ -304,7 +318,7 @@ func TestChatMentionConversationReceivesServerDetails(t *testing.T) {
 	s, fid := newRetestServer(t)
 	setRetestProvider(s, retestProvider{complete: func(_ context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
 		blob, _ := json.Marshal(req.Messages)
-		if !strings.Contains(string(blob), "original proof") || !strings.Contains(string(blob), "用户引用的记录快照") {
+		if !strings.Contains(string(blob), "original proof") || !strings.Contains(string(blob), "Snapshot of records referenced by the user") {
 			t.Errorf("model did not receive resolved evidence: %s", blob)
 		}
 		return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock("已读取引用")}}, "end_turn", llm.Usage{}, nil

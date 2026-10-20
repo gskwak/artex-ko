@@ -41,7 +41,7 @@ func assertKorean(t *testing.T, where, got string) {
 // 라벨은 모든 알림 채널(telegram·email·html·markdown·webhook·feishu·dingtalk·wecom)이
 // 공유하므로, 하나라도 중국어로 되돌아가면 전 채널 메시지가 혼재된다.
 func TestSeverityLabelLocalized(t *testing.T) {
-	// 중국어 라벨(严重/高危/中危/低危) → 한국어(심각/높음/중간/낮음), UI status.severity 정합.
+	// 기존 중국어 심각도 라벨 → 한국어(심각/높음/중간/낮음), UI status.severity 정합.
 	want := map[string]string{
 		"critical": "심각",
 		"high":     "높음",
@@ -103,7 +103,7 @@ func TestItemTitlePlaceholderLocalized(t *testing.T) {
 }
 
 // TestAssetLineLocalized 는 자산 나열 문구의 구분자·총수 표기가 한국어/ASCII 인지 검사한다.
-// 중국어 구두점(、)·等·个 가 되돌아오면 알림 본문에 혼재가 생긴다.
+// 중국어 구두점과 접미사가 되돌아오면 알림 본문에 혼재가 생긴다.
 func TestAssetLineLocalized(t *testing.T) {
 	// 상한 이하: 전부 나열, ASCII 쉼표 구분자.
 	if got := assetLine([]string{"a.example.com", "b.example.com"}, 3); got != "a.example.com, b.example.com" {

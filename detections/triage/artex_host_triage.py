@@ -106,10 +106,10 @@ CA_RELPATH = os.path.join("_ca", "mitmproxy-ca-cert.pem")
 INDEX_RELPATH = os.path.join("_index", "index.sqlite")
 BLOBS_RELDIR = "_blobs"
 
-# Log markers. The guard marker is the original (untranslated) framing string the
-# platform guard writes to the audit log on a blocked tool call (guard/guard.go);
-# it is kept verbatim here because that is the exact byte sequence a responder
-# greps for, and translating it would stop the match.
+# Log markers. The guard emits an English framing string on blocked calls.
+# Keep the old Chinese string as a separate marker for historical audit logs.
+GUARD_MARKER = "[ARTEX platform policy; not a target-side defense]"
+LEGACY_GUARD_MARKER = "【ARTEX 平台管控·非目标防御】"
 LOG_MARKERS = [
     {
         "value": "artex-enrich/1.0",
@@ -126,8 +126,15 @@ LOG_MARKERS = [
         "caveat": "Seen in outbound logs from a host running ARTEX; the string is configurable.",
     },
     {
-        "value": "【ARTEX 平台管控·非目标防御】",
+        "value": GUARD_MARKER,
         "title": "platform-guard audit-log framing marker",
+        "source": "guard/guard.go",
+        "severity": "high",
+        "caveat": "Also appears in logs that merely quote this defense guide or the ARTEX source.",
+    },
+    {
+        "value": LEGACY_GUARD_MARKER,
+        "title": "legacy platform-guard audit-log framing marker",
         "source": "guard/guard.go",
         "severity": "high",
         "caveat": "Also appears in logs that merely quote this defense guide or the ARTEX source.",
@@ -373,7 +380,7 @@ def scan_logs(logs, log_dirs):
             continue
         # Stream line by line instead of f.read(): the sanctioned log targets are
         # whole syslogs (--log /var/log/syslog) that can be hundreds of MB, and all
-        # three markers live within a single line, so a line at a time keeps memory
+        # all markers live within a single line, so a line at a time keeps memory
         # bounded to one line while matching exactly what a full read would.
         # open_log_stream transparently decompresses a .gz/.bz2/.xz rotated log so
         # its history is scanned too. Report each marker at most once per file (the
@@ -765,15 +772,16 @@ def self_test():
         with open(logpath, "w", encoding="utf-8") as f:
             f.write("GET / HTTP/1.1 artex-enrich/1.0\n")
             f.write("outbound artex-selfupdate to release host\n")
-            f.write("blocked: " + LOG_MARKERS[2]["value"] + " this operation is denied\n")
+            f.write("blocked: " + GUARD_MARKER + " this operation is denied\n")
+            f.write("blocked: " + LEGACY_GUARD_MARKER + " this operation is denied\n")
             f.write("a normal line with no markers\n")
         lf, _ = scan_logs([logpath], [])
-        check("logs: all three markers fire", len(lf) == 3)
+        check("logs: current and legacy guard markers both fire", len(lf) == 4)
 
         # 3b. rotated (compressed) logs under a --log-dir are scanned too, not
         # silently skipped. A responder pointing at /var/log/artex expects the
         # rotated history to be covered; a plain read of the compressed bytes
-        # would miss every marker inside. Plant one marker per container: a
+        # would miss every marker inside. Plant markers in each container: a
         # plaintext current log, a .gz, a .bz2, and an .xz rotation.
         rot = os.path.join(tmp, "rotated")
         os.makedirs(rot)
@@ -782,12 +790,13 @@ def self_test():
         with gzip.open(os.path.join(rot, "artex.log.1.gz"), "wt", encoding="utf-8") as f:
             f.write("GET / HTTP/1.1 artex-enrich/1.0\n")
         with bz2.open(os.path.join(rot, "artex.log.2.bz2"), "wt", encoding="utf-8") as f:
-            f.write("blocked: " + LOG_MARKERS[2]["value"] + " this operation is denied\n")
+            f.write("blocked: " + GUARD_MARKER + " this operation is denied\n")
         with lzma.open(os.path.join(rot, "artex.log.3.xz"), "wt", encoding="utf-8") as f:
             f.write("another GET / artex-enrich/1.0 probe\n")
+            f.write("blocked: " + LEGACY_GUARD_MARKER + " this operation is denied\n")
         rf, rskip = scan_logs([], [rot])
         rtitles = [f.title for f in rf]
-        check("rotated: plaintext + .gz + .bz2 + .xz markers all fire via --log-dir", len(rf) == 4)
+        check("rotated: plaintext + .gz + .bz2 + .xz markers all fire via --log-dir", len(rf) == 5)
         check("rotated: the .gz/.xz enrichment markers (missed by a plain read) are found",
               sum("enrichment prober" in t for t in rtitles) == 2)
         check("rotated: nothing is reported as skipped when every file has a stdlib codec", rskip == [])

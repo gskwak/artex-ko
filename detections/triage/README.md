@@ -22,8 +22,9 @@ rule** because they are not log- or network-observable and can only be checked o
 
 ## What it checks
 
-Every check is grounded in a string or path verified in this repository's source, and every finding
-carries the same honest caveat as the matching Sigma rule or indicator row.
+Current checks are grounded in strings or paths verified in this repository's source; the former guard
+marker is retained for historical logs. Every finding carries the same caveat as the matching Sigma rule
+or indicator row.
 
 - **Listening ports** — `:8787` (admin UI) and `127.0.0.1:8788` (recording proxy), the defaults of the
   `--addr` / `--proxy` flags in [`cmd/artex/main.go`](../../cmd/artex/main.go). Parsed from `ss`/`netstat`/`lsof`
@@ -34,8 +35,9 @@ carries the same honest caveat as the matching Sigma rule or indicator row.
   The CA is the trust anchor of an adversary-in-the-middle traffic recorder (ATT&CK T1557).
 - **Log markers** — the enrichment prober UA `artex-enrich/1.0` ([`enrich/enrich.go`](../../enrich/enrich.go)),
   the self-update egress UA `artex-selfupdate` ([`selfupdate/github.go`](../../selfupdate/github.go)), and
-  the platform-guard audit marker ([`guard/guard.go`](../../guard/guard.go); kept verbatim, including the
-  non-ASCII framing, so the grep matches) in the log file(s) you point it at. Rotated logs compressed as
+  the platform-guard audit marker ([`guard/guard.go`](../../guard/guard.go)). The script searches for the
+  current `[ARTEX platform policy; not a target-side defense]` and the legacy
+  `【ARTEX 平台管控·非目标防御】` verbatim, so it also detects older logs. Rotated logs compressed as
   `.gz`/`.bz2`/`.xz` are decompressed and scanned too, so the host's log history is covered; a format with
   no standard-library codec (`.zst`/`.lz4`) is reported as **skipped** rather than silently treated as
   clean — decompress it first or `grep` it by hand.

@@ -1,8 +1,11 @@
 package db
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"strconv"
 )
 
 // Tool is one row of the built-in tool catalog. key + handler live in code; this
@@ -17,8 +20,8 @@ type Tool struct {
 	Agents      []string        `json:"agents"`
 	Enabled     bool            `json:"enabled"`
 	Kind        string          `json:"kind"`     // builtin | command | script | http
-	Exec        json.RawMessage `json:"exec"`     // 自定义工具执行规格(kind!=builtin)
-	Deferred    bool            `json:"deferred"` // schema 延迟(走 SearchExtraTools/ExecuteExtraTool)
+	Exec        json.RawMessage `json:"exec"`     // Execution specification for a custom tool (kind != builtin).
+	Deferred    bool            `json:"deferred"` // Schema loaded on demand via SearchExtraTools/ExecuteExtraTool.
 	Calls       int             `json:"calls"`    // runtime ledger aggregate; not stored in tools
 }
 
@@ -39,7 +42,124 @@ func (d *DB) SeedTool(key, desc string, schema, agents json.RawMessage) error {
 INSERT INTO tools(key, system, description, schema, agents, enabled)
 VALUES ($1, true, $2, $3, $4, true)
 ON CONFLICT (key) DO NOTHING`, key, desc, schema, agents)
+	if err != nil {
+		return err
+	}
+	return d.migrateLegacyToolText(key, desc, schema)
+}
+
+// migrateLegacyToolText replaces only fields that still equal the former Chinese
+// built-in defaults. Tool descriptions and schema help are editable in the UI,
+// so each field is checked independently; bindings, enablement, and other schema
+// properties are left as stored. Hashes identify the old stock text without
+// carrying obsolete localized prose in the source.
+func (d *DB) migrateLegacyToolText(key, desc string, schema json.RawMessage) error {
+	old, known := legacyToolTextHashes[key]
+	if !known {
+		old, known = legacyHostToolTextHashes[key]
+	}
+	if !known {
+		return nil
+	}
+	var system bool
+	var currentDesc string
+	var currentSchema json.RawMessage
+	if err := d.QueryRow(`SELECT system, description, schema FROM tools WHERE key=$1`, key).
+		Scan(&system, &currentDesc, &currentSchema); err != nil {
+		return err
+	}
+	if !system {
+		return nil
+	}
+
+	nextDesc := currentDesc
+	stockDescription := old.description != "" && matchesLegacyText(currentDesc, old.description)
+	for _, digest := range old.alternateDescriptions {
+		stockDescription = stockDescription || matchesLegacyText(currentDesc, digest)
+	}
+	if stockDescription {
+		nextDesc = desc
+	}
+	var stored, fresh any
+	if err := json.Unmarshal(currentSchema, &stored); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(schema, &fresh); err != nil {
+		return err
+	}
+	schemaChanged := migrateLegacySchemaText(stored, fresh, "", old.fields)
+	if nextDesc == currentDesc && !schemaChanged {
+		return nil
+	}
+	nextSchema := currentSchema
+	if schemaChanged {
+		var err error
+		nextSchema, err = json.Marshal(stored)
+		if err != nil {
+			return err
+		}
+	}
+	// The old-value predicate also protects edits made between the read and update.
+	_, err := d.Exec(`UPDATE tools SET description=$2, schema=$3, updated_at=now()
+WHERE key=$1 AND system AND description=$4 AND schema=$5`,
+		key, nextDesc, nextSchema, currentDesc, currentSchema)
 	return err
+}
+
+func matchesLegacyText(value, digest string) bool {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:]) == digest
+}
+
+func migrateLegacySchemaText(stored, fresh any, path string, hashes map[string]string) bool {
+	switch old := stored.(type) {
+	case map[string]any:
+		defaults, ok := fresh.(map[string]any)
+		if !ok {
+			return false
+		}
+		changed := false
+		for key, value := range old {
+			newValue, exists := defaults[key]
+			if !exists {
+				continue
+			}
+			fieldPath := path + "/" + key
+			if text, ok := value.(string); ok {
+				if newText, ok := newValue.(string); ok && newText != text && matchesLegacyText(text, hashes[fieldPath]) {
+					old[key] = newText
+					changed = true
+				}
+				continue
+			}
+			if migrateLegacySchemaText(value, newValue, fieldPath, hashes) {
+				changed = true
+			}
+		}
+		return changed
+	case []any:
+		defaults, ok := fresh.([]any)
+		if !ok {
+			return false
+		}
+		changed := false
+		for i := 0; i < len(old) && i < len(defaults); i++ {
+			fieldPath := path + "/" + strconv.Itoa(i)
+			if text, ok := old[i].(string); ok {
+				if newText, ok := defaults[i].(string); ok && newText != text && matchesLegacyText(text, hashes[fieldPath]) {
+					old[i] = newText
+					changed = true
+				}
+				continue
+			}
+			if migrateLegacySchemaText(old[i], defaults[i], fieldPath, hashes) {
+				changed = true
+			}
+		}
+		return changed
+	default:
+		return false
+	}
 }
 
 // AddAgentToToolBinding adds an agent key to the given tools' `agents` arrays if

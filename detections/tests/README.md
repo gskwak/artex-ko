@@ -127,8 +127,8 @@ compilation with [sigma-cli](https://github.com/SigmaHQ/sigma-cli) (pySigma), an
 
 - **Valid** — `sigma check` reports 0 errors, 0 condition errors, and 0 issues over the whole tree.
 - **Compiles** — `sigma convert -t splunk` turns the whole tree into a backend query language without error.
-- **Indicators survive** — each atomic indicator string (`artex-enrich/1.0`, `artex-selfupdate`, the guard
-  marker, and the recording-proxy CA filename `mitmproxy-ca-cert.pem`) is still present in the compiled query,
+- **Indicators survive** — each atomic indicator string (`artex-enrich/1.0`, `artex-selfupdate`, both guard
+  marker versions, and the recording-proxy CA filename `mitmproxy-ca-cert.pem`) remains in the compiled query,
   so a rule cannot silently lose the string it is built on.
 - **Correlations compile** — the behaviour rules in [`../sigma/correlation/`](../sigma/correlation/) emit their
   `event_count` / `value_count` aggregations rather than being dropped.
@@ -349,30 +349,32 @@ Override the image with `PYTHON_IMAGE` if you mirror it internally.
 
 ## Indicator source-of-truth — [`indicators/`](indicators/)
 
-[`indicators/run.sh`](indicators/run.sh) proves the one thing the three tests above do not: that each rule's
+[`indicators/run.sh`](indicators/run.sh) proves the one thing the three tests above do not: that each current
 pinned indicator is still the string ARTEX's own source actually emits. The Sigma test proves an indicator
 survives rule→query *compilation*; the ATT&CK test proves the layer matches the rules' tags; the Suricata
 test proves the network rule *fires* on a synthesized capture. None of them look back at the source file the
 indicator claims to come from. The rot they all miss is an upstream re-sync that bumps the prober User-Agent
-to `artex-enrich/2.0` or rewrites the guard marker: every rule still compiles, the layer still matches, the
-pcap test still fires — and the deployed rule silently stops matching real ARTEX traffic. It asserts, for
-each indicator, bidirectionally:
+to `artex-enrich/2.0` or rewrites the current English guard marker: every rule still compiles, the layer
+still matches, and the pcap test still fires — while the deployed rule stops matching real ARTEX traffic. It asserts, for
+each current indicator, bidirectionally. The legacy Chinese guard marker is retained separately for
+backward-compatible detection of older logs:
 
-- **Source still emits it** — the value is present in the upstream source file(s) that produce it
-  (`artex-enrich/1.0` in `enrich/enrich.go`, `artex-selfupdate` in `selfupdate/`, the guard marker in
+- **Source still emits it** — the current value is present in the upstream source file(s) that produce it
+  (`artex-enrich/1.0` in `enrich/enrich.go`, `artex-selfupdate` in `selfupdate/`, the English guard marker in
   `guard/guard.go`). A missing value means an upstream change the rule has not caught up with.
-- **Rule still pins it** — the value is present in the rule built on it, so a rule edit cannot quietly move
-  the indicator away from its source. The Suricata rule is checked by its `startswith` prefix, matching how
-  it actually matches the wire.
+- **Rule still pins it** — both the current value and the historical guard marker remain in the rule built
+  on them, so a rule edit cannot quietly drop detection coverage. The Suricata rule is checked by its
+  `startswith` prefix, matching how it actually matches the wire.
 - **Deny-list correspondence** — the destructive-command tokens (`rm -rf`, `mkfs`, `DROP DATABASE`,
   `FLUSHALL`) appear both in ARTEX's guard deny-list (`db/db.go`) and in the hunting rule that mirrors it.
   These are generic hunting leads, not unique fingerprints, so the test asserts only the correspondence the
   rule actually claims.
 - **Published list stays grounded** — the machine-readable indicator list
   [`detections/indicators/artex_indicators.csv`](../indicators/artex_indicators.csv), the artifact a
-  defender imports, is re-read row by row: every value must still be present in the source file(s) it cites
-  and pinned in the rule(s) it cites, and every fingerprint the test grounds must appear in the list. So the
-  published CSV cannot silently drift from the source it claims to come from, in either direction.
+  defender imports, is re-read row by row: current values must remain in the source files they cite,
+  while the legacy marker must remain explicitly identified as historical. Both marker rows must remain
+  pinned in the rule, and every fingerprint the test grounds must appear in the list. So the published CSV
+  cannot silently drift from the sources or detection coverage it claims.
 - **Both gates fire on each pinned source** — every upstream source the test reads is covered by the two
   gates that run it: the CI workflow's `push` and `pull_request` paths filter
   ([`.github/workflows/detections.yml`](../../.github/workflows/detections.yml)) and the local pre-commit
@@ -382,8 +384,8 @@ each indicator, bidirectionally:
   on whichever gate omits it: on CI it passes the merge gate green, on the hook it is never caught locally
   even though the hook promises "the same source scope as CI".
 
-This turns [`../README.md`](../README.md)'s promise — "every indicator here is grounded in a string verified
-in this repository's source, not inferred" — and CONTRIBUTING's first contribution contract into a guard a
+This turns [`../README.md`](../README.md)'s promise — current indicators are grounded in source and the
+historical guard marker remains detectable — and CONTRIBUTING's first contribution contract into a guard a
 reviewer can re-run. Like the ATT&CK test it needs no detection backend, only the Python standard library;
 [`indicators/check.py`](indicators/check.py) reads the rule tree, the published indicator list, the pinned
 source packages, and the two gates that fire it (the CI workflow and the pre-commit config) mounted read-only
@@ -431,7 +433,7 @@ defender actually loads into a threat-intelligence platform, from drifting away 
 - **`to_ids` mirrors the `rule` column** — a rule-backed indicator is `to_ids: true`; a host-forensic row
   with no rule is `to_ids: false` with `disable_correlation: true`. Flipping a flag away from what the CSV
   implies fails, so the MISP event cannot quietly over- or under-claim which fingerprints are actionable.
-- **The guard marker survives byte-for-byte** and `detections/**` is in the CI paths filter, so a change to
+- **Both guard marker values survive byte-for-byte** and `detections/**` is in the CI paths filter, so a change to
   the CSV or the event triggers this suite.
 
 Unlike the pure-standard-library tests above, this suite installs a pinned `pymisp` inside its container

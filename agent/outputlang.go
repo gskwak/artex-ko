@@ -1,8 +1,8 @@
 package agent
 
-// 사용자 대면 출력 언어(展示语言) 선택. artex-ko 는 영어·한국어·중국어·스페인어
+// 사용자 대면 출력 언어 선택. artex-ko 는 영어·한국어·중국어·스페인어
 // 네 언어 중 하나로 에이전트가 사용자에게 보이는 자연어를 쓰도록 강제한다. 에이전트의
-// "뇌"(벤치마크된 중국어 추론 본문 段[A])는 언어와 무관하게 그대로 둔다. 여기서 정하는
+// "뇌"(벤치마크된 추론 본문 [A])는 언어와 무관하게 그대로 둔다. 여기서 정하는
 // 것은 오직 사용자가 읽는 표면의 언어다.
 
 // OutputLanguage 는 서버가 설정(config 의 ARTEX_LANG, 런타임 settings KV)에서 고른
@@ -39,19 +39,19 @@ func resolveOutputLang() string {
 	return defaultOutputLang
 }
 
-// langPhrase 는 (중국어로 쓰인) 지시문 안에서 "이 언어로 써라"라고 지목할 때 쓰는 표기다.
+// langPhrase 는 (영어로 쓰인) 지시문 안에서 "이 언어로 써라"라고 지목할 때 쓰는 표기다.
 // 괄호 안에 자국어 표기를 함께 둬서 모델이 어떤 언어인지 혼동하지 않게 한다.
 var langPhrase = map[string]string{
-	"ko": "韩语（한국어）",
-	"en": "英语（English）",
-	"zh": "中文（简体中文）",
-	"es": "西班牙语（Español）",
+	"ko": "Korean (한국어)",
+	"en": "English",
+	"zh": "Chinese (Simplified Chinese)",
+	"es": "Spanish (Español)",
 }
 
 // langBare 는 지시문 안에서 반복 지목할 때 쓰는 짧은 언어명이다.
 var langBare = map[string]string{
-	"ko": "韩语",
-	"en": "英语",
-	"zh": "中文",
-	"es": "西班牙语",
+	"ko": "Korean",
+	"en": "English",
+	"zh": "Chinese",
+	"es": "Spanish",
 }

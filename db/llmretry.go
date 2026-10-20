@@ -5,18 +5,19 @@ import (
 	"time"
 )
 
-// LLM 重试策略：五层重试的「次数 + 间隔」全局配置，见 docs/LLM重试设计.md。
-// 存在 settings 表的一个 JSON 值里 —— 它是整机一份的运行参数，不值得为它开一张表；
-// 读取走内置默认兜底，所以键不存在(全新库/从未配置过)时行为与写死常量时代完全一致。
+// The LLM retry policy configures attempts and intervals for five retry layers.
+// It is stored as one JSON value in the settings table because it is a single
+// process-wide runtime setting. Reads fall back to built-in defaults, so an
+// absent key behaves the same as the original hard-coded configuration.
 
 const settingLLMRetryPolicy = "llm_retry_policy"
 
 // RetryRule is one layer's knob pair. The zero value means "unset":
 //
-//	Attempts   0 = 用内置默认次数; -1 = 关闭该层重试; >0 = 用该值
-//	IntervalMS 0 = 用该层原本的间隔策略(通常是指数退避); >0 = 改用固定毫秒间隔
+//	Attempts   0 = use the built-in default; -1 = disable this retry layer; >0 = use this value
+//	IntervalMS 0 = use this layer's default interval strategy (usually exponential backoff); >0 = use a fixed interval in milliseconds
 //
-// -1 是「显式关掉」而不是「0 次」，因为 0 已经被「未配置」占用了。
+// -1 explicitly disables retries because 0 means "not configured."
 type RetryRule struct {
 	Attempts   int `json:"attempts"`
 	IntervalMS int `json:"interval_ms"`
@@ -76,20 +77,22 @@ func (o RetryOverride) Clamped() RetryOverride {
 	return o
 }
 
-// LLMRetryPolicy holds the五层 retry configuration. Connect/Empty/Stream are the
+// LLMRetryPolicy holds the five-layer retry configuration. Connect/Empty/Stream are the
 // per-request layers (a profile may override them, see LLMProfile.Retry);
 // Breaker and Intent are process-wide by nature and live only here.
 type LLMRetryPolicy struct {
-	// Connect：SDK 建连重试(连接重置/超时/429/5xx，流开始前)。默认 3 次、指数退避。
+	// Connect retries SDK connection failures (resets, timeouts, 429, 5xx) before streaming starts. Default: 3 attempts with exponential backoff.
 	Connect RetryRule `json:"connect"`
-	// Empty：SDK 空响应重试(完成但无 content block，仅 openai 格式)。默认 2 次、指数退避。
+	// Empty retries SDK responses that complete without a content block (OpenAI format only). Default: 2 attempts with exponential backoff.
 	Empty RetryRule `json:"empty"`
-	// Stream：同 provider 安全窗口重试(未交付输出前的断流重放)。默认 2 次、0.5s 起指数(封顶 4s)。
+	// Stream retries a broken stream with the same provider before any output is delivered. Default: 2 attempts, exponential backoff from 0.5s capped at 4s.
 	Stream RetryRule `json:"stream"`
-	// Breaker：轮询熔断。Attempts=连续几次瞬时失败触发熔断(默认 3，-1=瞬时失败不熔断，
-	// 硬失败如余额不足/密钥失效仍立即熔断)；IntervalMS=固定冷却时长(0=默认 1/5/30min 梯度)。
+	// Breaker controls the polling circuit breaker. Attempts is the number of consecutive
+	// transient failures before it opens (default 3; -1 disables opening for transient failures).
+	// Hard failures, such as insufficient balance or an invalid key, still open it immediately.
+	// IntervalMS sets a fixed cooldown (0 uses the default 1/5/30-minute progression).
 	Breaker RetryRule `json:"breaker"`
-	// Intent：worker 以 model_error 收场后的整条意图重跑。默认 2 次、固定 3s。
+	// Intent reruns the entire intent after a worker ends with model_error. Default: 2 attempts at fixed 3s intervals.
 	Intent RetryRule `json:"intent"`
 }
 

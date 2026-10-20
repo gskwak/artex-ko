@@ -19,12 +19,8 @@ import (
 	actool "github.com/Autumn-27/norma/tool"
 )
 
-// 사용자 노출 HTTP 에러 응답 문구. 아래 네 문구는 HTTP 핸들러(findingTrafficAccess·
-// bindFindingTraffic·editFindingTraffic)에서만 반환되고 에이전트 도구 경로
-// (toolGetFindingTraffic)에는 닿지 않으므로 한국어로 번역한다. 반대로
-// readEvidencePreview 의 errors.New(offset/length 검증)·이진 본문 플레이스홀더와
-// roTool("get_finding_traffic") 도구 설명은 에이전트가 읽는 두뇌 입력이라 원문을
-// 보존한다(각 지점 주석 참조, F16 두뇌 경계 계열).
+// HTTP 핸들러에서 반환하는 사용자 노출 오류 문구는 한국어로 제공한다.
+// 에이전트 도구 설명과 공유 미리보기의 오류·플레이스홀더는 영어로 제공한다.
 const (
 	errFindingTrafficInheritedReadonly  = "상속된 취약점은 읽기 전용이라 출처 작업에서 수정해야 합니다"
 	errFindingTrafficSelectRequired     = "트래픽을 선택하세요"
@@ -252,12 +248,10 @@ type evidencePreview struct {
 }
 
 // readEvidencePreview 는 HTTP 핸들러와 에이전트 도구(toolGetFindingTraffic)가 함께
-// 쓰는 공유 헬퍼다. 아래 두 errors.New 와 이진 본문 플레이스홀더(Content)는 에이전트
-// 도구 결과(actool.Errorf·body 콘텐츠)로 되먹여져 두뇌 입력이 되므로, 성능 드리프트를
-// 피하려고 중국어 원문을 보존한다(F16 두뇌 경계 계열 — 표시/입력 분리는 별도 결정 대기).
+// 쓰는 공유 헬퍼다. 오류 문구와 이진 본문 플레이스홀더(Content)는 영어로 제공한다.
 func readEvidencePreview(store *evidence.Store, snapshot db.TrafficEvidenceSnapshot, side string, offset, length int64) (out evidencePreview, err error) {
 	if offset < 0 || length < 0 {
-		return out, errors.New("offset / length 不能为负数")
+		return out, errors.New("offset and length cannot be negative")
 	}
 	if length == 0 || length > 8192 {
 		length = 8192
@@ -268,7 +262,7 @@ func readEvidencePreview(store *evidence.Store, snapshot db.TrafficEvidenceSnaps
 	}
 	defer f.Close()
 	if offset > total {
-		return out, errors.New("offset 超出正文长度")
+		return out, errors.New("offset exceeds body length")
 	}
 	if _, err = f.Seek(offset, io.SeekStart); err != nil {
 		return out, err
@@ -291,7 +285,7 @@ func readEvidencePreview(store *evidence.Store, snapshot db.TrafficEvidenceSnaps
 	out = evidencePreview{Offset: offset, Total: total, NextOffset: offset + int64(len(raw)), Truncated: offset+int64(len(raw)) < total,
 		Binary: bytes.IndexByte(raw, 0) >= 0 || (offset == 0 && !utf8.Valid(raw))}
 	if out.Binary {
-		out.Content = fmt.Sprintf("[二进制正文，%d 字节；请下载查看]", total)
+		out.Content = fmt.Sprintf("[binary body, %d bytes; download to view]", total)
 	} else {
 		out.Content = string(bytes.ToValidUTF8(raw, []byte("�")))
 	}
@@ -383,8 +377,8 @@ func (s *Server) getFindingTrafficBody(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) toolGetFindingTraffic() actool.CoreTool {
-	return roTool("get_finding_traffic", "读取漏洞已绑定的真实流量证据，不依赖捕获开关。finding_id 使用 report_finding JSON 返回的独立漏洞记录 ID（不是第一行的探索节点 ID）。先不传 binding_id 获取清单及 version；空清单是正常情况，TCP 等非 HTTP 漏洞或未采集时仍可依据文字/命令证据编写报告，不强制绑定。有绑定时按 binding_id、side(request/response)、offset 分段读取正文。写报告时将读取的 version 作为 evidence_version 传给 update_finding_report，后者 finding_id 仍使用探索节点 ID。",
-		objSchema(map[string]any{"finding_id": strParam("独立漏洞记录 ID"), "binding_id": strParam("清单里的绑定 ID，省略则返回清单"), "side": strParam("request 或 response，默认 response"), "offset": map[string]any{"type": "integer"}, "length": map[string]any{"type": "integer"}}, "finding_id"),
+	return roTool("get_finding_traffic", "Read verified traffic evidence attached to a finding, regardless of whether capture is enabled. For finding_id, use the separate finding record ID returned in the report_finding JSON, not the exploration node ID on the first line. Omit binding_id first to get the binding list and version. An empty list is normal: reports for TCP and other non-HTTP findings, or findings without captured traffic, can use textual or command evidence without binding traffic. For a binding, read the body in segments using binding_id, side (request/response), and offset. When writing a report, pass the version you read as evidence_version to update_finding_report; that tool's finding_id still uses the exploration node ID.",
+		objSchema(map[string]any{"finding_id": strParam("Separate finding record ID"), "binding_id": strParam("Binding ID from the list; omit to return the list"), "side": strParam("request or response; defaults to response"), "offset": map[string]any{"type": "integer"}, "length": map[string]any{"type": "integer"}}, "finding_id"),
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {
 				FindingID      json.RawMessage `json:"finding_id"`

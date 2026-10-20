@@ -4,8 +4,8 @@
 
 > 이 디렉터리는 [방어·탐지 가이드(../docs/defense-ko.md)](../docs/defense-ko.md) 4절 "탐지 규칙"의
 > 의사 규칙을, 각자의 SIEM·EDR 질의 언어로 변환해 바로 배포할 수 있는 벤더 중립
-> [Sigma](https://sigmahq.io) 형식으로 옮긴 것입니다. 여기 실린 모든 지표는 **추정이 아니라** 이
-> 저장소 소스에서 실제로 확인한 문자열이나 행동에 근거합니다. 모든 규칙은 자신이 소유하거나 서면
+> [Sigma](https://sigmahq.io) 형식으로 옮긴 것입니다. 현재 지표는 이 저장소 소스에서 실제로 확인한
+> 문자열이나 행동에 근거하고, 과거 가드 마커는 이전 로그 탐지를 위해 보존합니다. 모든 규칙은 자신이 소유하거나 서면
 > 허가를 받은 시스템을 지키는 **방어·탐지 목적에만** 사용하십시오.
 
 ## 원자(atomic) 규칙
@@ -16,7 +16,9 @@
   아웃바운드 `artex-selfupdate` User-Agent 입니다. 호스트·포렌식 관점의 송신(egress) 지표입니다.
   `level: medium`.
 - **`sigma/artex_guard_audit_framing.yml`**: 도구 호출이 차단될 때 감사 로그에 기록되는 플랫폼
-  가드 통제 마커(`guard/guard.go`)입니다. 호스트·포렌식 지표입니다. `level: high`.
+  가드 통제 마커(`guard/guard.go`)입니다. 현재는 `[ARTEX platform policy; not a target-side defense]`를
+  기록하며, 이전 로그의 `【ARTEX 平台管控·非目标防御】`도 이 규칙이 탐지합니다. 호스트·포렌식 지표입니다.
+  `level: high`.
 - **`sigma/destructive_command_hunting.yml`**: ARTEX 가드의 기본 차단 목록(`db/db.go` 시드)을
   그대로 반영한 파괴적 셸·DB 명령입니다. ARTEX 고유 시그니처가 아니라 일반적인 헌팅 단서입니다.
   `level: medium`.
@@ -74,9 +76,9 @@ Sigma 는 호스트와 로그 텔레메트리를 다룹니다. 네트워크 선�
 ## 침해지표 목록 (기계가 읽는)
 
 탐지 로직이 아니라 원자 지표 자체를 원하는 방어자를 위해,
-[`indicators/artex_indicators.csv`](indicators/)는 ARTEX 가 내보내는 고유 지문을 CSV 한 파일에
+[`indicators/artex_indicators.csv`](indicators/)는 ARTEX 가 현재 내보내는 고유 지문과 과거 가드 마커를 CSV 한 파일에
 모았습니다. 위협 인텔리전스 플랫폼이나 SIEM 조회 테이블, 호스트 분류(triage) 체크리스트에 바로
-넣을 수 있도록 보강·자가 업데이트 User-Agent, 가드 감사 마커, 서버·프록시 기본 엔드포인트, 기록
+넣을 수 있도록 보강·자가 업데이트 User-Agent, 현재·과거 가드 감사 마커, 서버·프록시 기본 엔드포인트, 기록
 프록시 CA 인증서, 그리고 PostgreSQL 탐색 그래프 스키마 지문을 담고, 각 행에는 근거가 된 소스
 파일과 (있다면) 그 위에 세운 규칙을 함께 적었습니다. 같은 지표를 바로
 가져올 수 있는 [MISP](https://www.misp-project.org/) 이벤트
@@ -127,16 +129,17 @@ mitmproxy CA 신뢰 변수를 함께 지니는지(`agent/worker.go`)를 `/proc` 
   태그여야 하고, 각 기법은 실재하는 규칙 파일을 지목해야 합니다. 레이어를 갱신하지 않고 규칙을
   추가하면(또는 그 반대면) 테스트가 실패합니다.
 - **지표 근거(source-of-truth)** ([`tests/indicators/run.sh`](tests/indicators/run.sh)): 각 규칙이
-  고정한 지표가 여전히 상류 소스가 내보내는 바로 그 문자열인지 확인합니다. `enrich/enrich.go` 의
-  `artex-enrich/1.0`, `selfupdate/` 의 `artex-selfupdate`, `guard/guard.go` 의 가드 마커, `db/db.go`
-  의 파괴 토큰이 규칙에도 여전히 고정돼 있는지 봅니다. 다른 세 테스트가 놓치는 드리프트, 즉 모든
+  고정한 현재 지표가 여전히 상류 소스가 내보내는 바로 그 문자열인지 확인합니다. `enrich/enrich.go` 의
+  `artex-enrich/1.0`, `selfupdate/` 의 `artex-selfupdate`, `guard/guard.go` 의 영어 가드 마커, `db/db.go`
+  의 파괴 토큰이 규칙에도 여전히 고정돼 있는지 봅니다. 과거 중국어 마커는 이전 로그를 위해 규칙과
+  공개 지표 목록에서 계속 탐지하도록 유지합니다. 다른 세 테스트가 놓치는 드리프트, 즉 모든
   규칙이 컴파일되고 발화하는 와중에 상류 재동기화가 User-Agent 나 마커를 바꿔 버리는 경우를
   잡습니다. 같은 테스트가 기계가 읽는 [`indicators/artex_indicators.csv`](indicators/artex_indicators.csv)
-  를 다시 읽어, 발행된 모든 행이 여전히 소스와 규칙에 근거함을 단언하므로 방어자가 가져오는 산출물도
-  낡지 않습니다. 끝으로, 읽는 모든 상류 소스가 CI 워크플로의 `push`·`pull_request` 경로 필터에
+  를 다시 읽어, 현재 행은 소스와 규칙에 근거하고 과거 마커는 역사적 값으로 남아 있음을 확인합니다.
+  끝으로, 읽는 모든 상류 소스가 CI 워크플로의 `push`·`pull_request` 경로 필터에
   들어 있음을 단언해, 새로 고정한 소스 하나만 건드린 PR 이 테스트를 건너뛰어 그 드리프트가 머지
-  게이트를 통과하지 못하게 합니다. 이로써 "추정이 아니라 이 저장소 소스에서 확인한 문자열에
-  근거한다"(위)는 약속이 말이 아니라 가드가 됩니다.
+  게이트를 통과하지 못하게 합니다. 따라서 현재 값의 소스 근거와 과거 마커의 탐지 호환성을
+  검토자가 다시 검사할 수 있습니다.
 - **MISP 내보내기 일관성** ([`tests/misp/run.sh`](tests/misp/run.sh)): MISP 이벤트
   ([`indicators/artex_indicators.misp.json`](indicators/artex_indicators.misp.json))가 유효한 MISP
   문서임을 증명합니다. [pymisp](https://github.com/MISP/PyMISP) 로 적재되는데, pymisp 의 객체 모델은

@@ -1,37 +1,41 @@
-// Package notify 实现漏洞发现的 IM / 邮件推送渠道适配层。
+// Package notify adapts IM and email push channels for finding notifications.
 //
-// 分层：本包是**叶子包**，只依赖标准库。它不认识数据库、不认识 server。渠道配置
-// 以 map[string]any 传入（对应 notification_channels.config 这一 JSONB 列），
-// 待推送内容以 Message 传入。这样拆开的好处是：签名计算、UTF-8 截断、过滤匹配这些
-// 真正容易出错的地方可以脱离 PostgreSQL 单测，宿主只需在 server 侧做编排。
+// This is a **leaf package** that depends only on the standard library. It knows
+// neither the database nor the server. Channel configuration arrives as
+// map[string]any (the notification_channels.config JSONB column), and content
+// arrives as Message. This allows signature calculation, UTF-8 truncation, and
+// filtering to be unit tested without PostgreSQL; the server orchestrates delivery.
 //
-// 并发约定：Channel 的实现必须**无状态**。同一个 Channel 实例会被多个渠道配置
-// （甚至同一渠道的多个机器人实例）并发复用，所有凭据一律从 cfg 参数传入，
-// 不允许把 webhook URL 之类的东西缓存进实现自身的字段。
+// Concurrency contract: Channel implementations must be **stateless**. One Channel
+// instance is reused concurrently across channel configurations and even multiple
+// robots of the same type. Pass all credentials through cfg; do not cache webhook
+// URLs or similar configuration in implementation fields.
 package notify
 
-// 渠道类型标识。取值同时是 notification_channels.kind 的合法集合，由 server 侧
-// 白名单校验（与 findings.status 同理，不用 DB CHECK，方便后续加渠道）。
+// Channel kind identifiers also define the allowed notification_channels.kind
+// values. The server validates the allowlist, as with findings.status, instead
+// of using a DB CHECK so new channels can be added easily.
 const (
-	KindDingTalk = "dingtalk" // 钉钉自定义机器人
-	KindFeishu   = "feishu"   // 飞书(含 Lark)自定义机器人
-	KindWeCom    = "wecom"    // 企业微信群机器人
-	KindWebhook  = "webhook"  // 通用 Webhook：自定义方法/头/JSON 模板
+	KindDingTalk = "dingtalk" // DingTalk custom robot
+	KindFeishu   = "feishu"   // Feishu (including Lark) custom robot
+	KindWeCom    = "wecom"    // WeCom group robot
+	KindWebhook  = "webhook"  // Generic webhook: custom method, headers, and JSON template
 	KindTelegram = "telegram" // Telegram Bot API
-	KindEmail    = "email"    // SMTP 邮件
+	KindEmail    = "email"    // SMTP email
 )
 
-// 事件类型，对应 notification_events.kind。
+// Event kinds correspond to notification_events.kind.
 const (
 	EventFindingCreated       = "finding_created"
 	EventFindingStatusChanged = "finding_status_changed"
 )
 
-// InitKind 是 config 里为空的 kind 的兜底值。
+// InitKind is the fallback when config.kind is empty.
 const InitKind = KindDingTalk
 
-// severityRank 把漏洞级别映射成可比较的序数。未知级别返回 0，因此任何
-// min_severity 设置都会把未知级别挡在外面——存疑时不推，避免误报刷屏。
+// severityRank maps finding severities to comparable ranks. Unknown values have
+// rank 0, so any min_severity setting excludes them rather than sending uncertain
+// notifications that could flood the channel.
 var severityRank = map[string]int{
 	"low":      1,
 	"medium":   2,
@@ -39,7 +43,7 @@ var severityRank = map[string]int{
 	"critical": 4,
 }
 
-// SeverityRank 返回级别的序数；未知级别返回 0。
+// SeverityRank returns a severity's rank, or 0 for an unknown severity.
 func SeverityRank(severity string) int { return severityRank[severity] }
 
 // Lang, when wired by the server, returns the active user-facing output language
@@ -76,8 +80,8 @@ var statusLabels = map[string]map[string]string{
 	"es": {"pending": "Pendiente", "in_progress": "En curso", "confirmed": "Confirmado", "resolved": "Resuelto", "fixed": "Corregido", "false_positive": "Falso positivo", "ignored": "Ignorado", "duplicate": "Duplicado", "risk_accepted": "Riesgo aceptado"},
 }
 
-// SeverityLabel 返回带 emoji 的级别名(按当前输出语言)，用于消息标题与卡片配色。
-// 未知级别原样回显，不臆造。
+// SeverityLabel returns an emoji-prefixed severity in the active output language
+// for message titles and card colors. Unknown severities are returned unchanged.
 func SeverityLabel(severity string) string {
 	if v, ok := severityLabels[labelLang()][severity]; ok {
 		return v
@@ -85,7 +89,8 @@ func SeverityLabel(severity string) string {
 	return severity
 }
 
-// StatusLabel 把处置状态翻译成当前输出语言，用于状态变更消息。未知状态原样回显。
+// StatusLabel translates a disposition status for status-change messages in the
+// active output language. Unknown statuses are returned unchanged.
 func StatusLabel(status string) string {
 	if v, ok := statusLabels[labelLang()][status]; ok {
 		return v
@@ -93,8 +98,8 @@ func StatusLabel(status string) string {
 	return status
 }
 
-// AtLeast 判断 severity 是否达到 min 门槛。min 为空表示不设门槛，一律通过。
-// 注意未知 severity 的序数为 0，会被任何非空 min 拒掉（见 severityRank 注释）。
+// AtLeast reports whether severity meets min. An empty min passes everything.
+// Unknown severities have rank 0 and fail any nonempty min (see severityRank).
 func AtLeast(severity, min string) bool {
 	if min == "" {
 		return true

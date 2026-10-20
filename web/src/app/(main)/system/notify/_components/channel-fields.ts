@@ -1,35 +1,35 @@
-// 渠道字段表与配置值的解析工具。
+// Channel field definitions and configuration-value parsers.
 //
-// 与页面拆开是因为这一份是**数据**而不是视图：它描述每种渠道有哪些字段、
-// 各自该用什么控件，以及表单文本到配置值（JSON）的双向转换。
-// 单独放一个文件后，新增渠道只需要动这里，页面本身不必改。
+// This data module is separate from the page because it describes each
+// channel's fields, their controls, and conversion between form text and JSON.
+// Adding a channel only requires changes here, not in the page.
 //
-// 本文件是纯数据模块（非 client component），不能调用 useTranslations。
-// 所以文案不写死在这里，而是存 i18n 键（notifyPage 命名空间），由渲染它们的
-// 组件（page.tsx / channel-form.tsx）用 t() 解析——键是 ASCII，上游中文原文
-// 保留在 messages/zh.json。渠道类型展示名改走 notifyPage.kind.<kind>。
+// This is a plain data module, not a client component, so it cannot call
+// useTranslations. It stores i18n keys in the notifyPage namespace rather
+// than hard-coded copy. The rendering components resolve them with t().
+// Channel-kind display names use notifyPage.kind.<kind>.
 
-// 各渠道的配置字段定义。
+// Configuration fields for each channel kind.
 //
-// 这里刻意保留一份前端字段表，而不是让后端下发 schema：后端只负责
-// Validate（必填/格式），UI 需要的是布局与控件类型，两者关注的不是同一件事。
-// 唯一的耦合点是 secret_keys —— 哪些字段该渲染成密码框由后端给出，
-// 因为只有渠道实现自己清楚哪些值算凭据（企业微信的整个 Webhook 就是凭据，
-// 而钉钉的只是其中一个 secret）。新增渠道时这里少一个条目只会让表单变空白，
-// 不会静默出错（下面的 hasFields 会提示）。
+// Keep a frontend field table instead of fetching a schema from the backend:
+// backend validation covers required fields and formats, while the UI needs
+// layout and control types. The only shared detail is secret_keys, supplied by
+// the backend because each channel knows which values are credentials (the
+// entire WeCom webhook is secret; for DingTalk only its secret is). A missing
+// entry for a new channel leaves an empty form and surfaces via hasFields.
 //
-// label / help / options[].label 存的是 notifyPage 命名空间下的 i18n 键，
-// placeholder 保留字面值（URL、示例，不翻译）。
+// label, help, and options[].label hold notifyPage i18n keys.
+// Placeholders remain literal URLs or examples.
 export type FieldKind = "text" | "password" | "number" | "select" | "textarea" | "switch" | "kv" | "list";
 export interface FieldDef {
   key: string;
-  /** notifyPage 命名空间下的 i18n 键 */
+  /** i18n key in the notifyPage namespace */
   label: string;
   kind: FieldKind;
   placeholder?: string;
-  /** notifyPage 命名空间下的 i18n 键 */
+  /** i18n key in the notifyPage namespace */
   help?: string;
-  /** options[].label 也是 i18n 键 */
+  /** options[].label is also an i18n key */
   options?: { value: string; label: string }[];
 }
 export const CHANNEL_FIELDS: Record<string, FieldDef[]> = {
@@ -118,7 +118,7 @@ export const CHANNEL_FIELDS: Record<string, FieldDef[]> = {
   ],
 };
 
-// value 是过滤用的 min_severity 值，label 是 notifyPage.severityOpt.* 的 i18n 键。
+// value is the min_severity filter value; label is a notifyPage.severityOpt.* i18n key.
 export const SEVERITY_OPTIONS = [
   { value: "", label: "severityOpt.all" },
   { value: "low", label: "severityOpt.low" },
@@ -157,7 +157,7 @@ export const emptyForm = (kind: string): ChannelForm => ({
   onStatusChange: false,
 });
 
-// parseKV 解析「每行 KEY=VALUE」的文本域。
+// Parse a text area containing one KEY=VALUE pair per line.
 export function parseKV(text: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const line of text.split("\n")) {
@@ -168,8 +168,8 @@ export function parseKV(text: string): Record<string, string> {
   }
   return out;
 }
-// parseIDs 解析逗号/空白分隔的 id 列表。分隔符保留全角逗号「，」：
-// 用户可能从别处粘贴带全角逗号的列表，这是输入解析逻辑而非展示文案。
+// Parse IDs separated by commas or whitespace. Keep the full-width comma as
+// a delimiter because users may paste lists containing it from elsewhere.
 export function parseIDs(text: string): number[] {
   return text
     .split(/[\s,，]+/)
@@ -178,8 +178,9 @@ export function parseIDs(text: string): number[] {
     .map((s) => Number(s))
     .filter((n) => Number.isFinite(n) && n > 0);
 }
-// parseKeywords 解析行/逗号分隔的关键词列表（漏洞类型名可能含空格，所以按行或逗号切）。
-// 同样保留全角逗号「，」作为分隔符（输入解析，非展示）。
+// Parse keywords separated by lines or commas. Vulnerability class names may
+// contain spaces, so whitespace is not a delimiter. Keep full-width commas
+// as input delimiters as well.
 export function parseKeywords(text: string): string[] {
   return text
     .split(/[\n,，]+/)

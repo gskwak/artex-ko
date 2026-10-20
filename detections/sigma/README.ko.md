@@ -5,8 +5,8 @@
 이 디렉터리는 ARTEX 탐지 묶음에서 호스트·로그·SIEM 계층을 맡습니다. 여기 실린
 [Sigma](https://sigmahq.io) 규칙은 방어 가이드([한국어](../../docs/defense-ko.md) ·
 [English](../../docs/defense-en.md)) 4절의 의사 규칙을 벤더 중립 형식으로 정식화한 것이고, 각자의
-SIEM·EDR 질의 언어로 변환해 씁니다. 모든 지표는 추정이 아니라 이 저장소 소스에서 실제로 확인한
-문자열이나 행동에 근거합니다. 네트워크 계층은 [`../suricata/`](../suricata/)에 있고, ATT&CK 레이어와
+SIEM·EDR 질의 언어로 변환해 씁니다. 현재 지표는 이 저장소 소스에서 확인한 문자열이나 행동에
+근거하고, 과거 가드 마커는 이전 로그 탐지를 위해 보존합니다. 네트워크 계층은 [`../suricata/`](../suricata/)에 있고, ATT&CK 레이어와
 지표 CSV·MISP 내보내기, 호스트 분류 스크립트를 포함한 전체 탐지 묶음은
 [`../README.ko.md`](../README.ko.md)가 색인합니다. 모든 규칙은 자신이 소유하거나 서면 허가를 받은
 시스템을 지키는 **방어·탐지 목적에만** 사용하십시오.
@@ -24,7 +24,8 @@ SIEM·EDR 질의 언어로 변환해 씁니다. 모든 지표는 추정이 아�
   User-Agent 입니다. 호스트·포렌식 egress 지표입니다. `level: medium`.
 - **[`artex_guard_audit_framing.yml`](artex_guard_audit_framing.yml)**: *ARTEX Platform Guard
   Audit-Log Framing*. 도구 호출이 차단될 때 감사 로그에 기록되는 플랫폼 가드 통제 마커입니다
-  (`guard/guard.go`). 호스트·포렌식 지표입니다. `level: high`.
+  (`guard/guard.go`). 현재 기록되는 `[ARTEX platform policy; not a target-side defense]`와 이전 로그의
+  `【ARTEX 平台管控·非目标防御】`를 모두 탐지합니다. 호스트·포렌식 지표입니다. `level: high`.
 - **[`artex_recording_proxy_ca.yml`](artex_recording_proxy_ca.yml)**: *ARTEX Recording-Proxy MITM CA
   Certificate Artifact*. 기록 프록시가 `_ca/mitmproxy-ca-cert.pem` 배치로 생성하는 MITM CA 파일입니다
   (`traffic/traffic.go`). 호스트·포렌식 산출물이며, 파일명 자체는 단독 실행 mitmproxy 와도 공유되므로

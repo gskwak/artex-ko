@@ -35,13 +35,22 @@
         "comment": "ARTEX self-update egress User-Agent to the release host (selfupdate/github.go, selfupdate/stage.go). Seen in outbound logs from an ARTEX host. Sigma: artex_selfupdate_egress.yml."
       },
       {
+        "uuid": "dd28b4e3-89f0-4782-8a48-0662b9bf0a19",
+        "type": "pattern-in-file",
+        "category": "Artifacts dropped",
+        "to_ids": true,
+        "disable_correlation": false,
+        "value": "[ARTEX platform policy; not a target-side defense]",
+        "comment": "Current control-framing prefix ARTEX writes to its audit log on a blocked tool call (guard/guard.go). Its presence in audit records supports an ARTEX-execution finding. Sigma: artex_guard_audit_framing.yml."
+      },
+      {
         "uuid": "053cbbbd-c345-49f0-b6e3-1b6f6075a218",
         "type": "pattern-in-file",
         "category": "Artifacts dropped",
         "to_ids": true,
         "disable_correlation": false,
         "value": "【ARTEX 平台管控·非目标防御】",
-        "comment": "Control-framing prefix ARTEX writes to its audit log on a blocked tool call (guard/guard.go). Its presence in audit records supports an ARTEX-execution finding. Sigma: artex_guard_audit_framing.yml."
+        "comment": "Legacy control-framing prefix written by earlier ARTEX releases. Keep matching historical audit records; current builds emit the English marker. Sigma: artex_guard_audit_framing.yml."
       },
       {
         "uuid": "d5fe7761-c297-4e35-acfe-a3a4a5f01f7b",

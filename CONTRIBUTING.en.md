@@ -37,15 +37,15 @@ user who runs it. This repository is provided "AS IS."
 
 ## Localization policy
 
-The reason this repository exists is to **preserve the original
-[Autumn-27/ARTEX](https://github.com/Autumn-27/ARTEX) (currently unreachable, checked 2026-10) judgment performance exactly while
-changing only the user-facing output to Korean**. Translation contributions that depart from
-this policy can degrade performance, so we do not accept them.
+This repository localizes [Autumn-27/ARTEX](https://github.com/Autumn-27/ARTEX)
+(currently unreachable, checked 2026-10) for a Korean UI and user-facing output,
+while maintaining the code and internal agent instructions in English. Changes to
+agent instructions can affect model behavior and should include behavioral validation.
 
-- **Do not translate the agent's internal reasoning prompts (the behavior-instruction body).**
-  The behavior benchmarked in the original language (Chinese) must be preserved. This body
-  lives in `agent/promptcatalog.go` and the DB seed (`agent_prompts`). Translating it causes
-  drift in the agent's judgment.
+- **Keep the agents' internal behavioral prompts in English.** When changing
+  `agent/promptcatalog.go` or the DB seed (`agent_prompts`), preserve tool names,
+  template variables, and safety boundaries, then validate model behavior in an
+  authorized, isolated environment.
 - **Only user-facing output is forced into Korean.** This covers detection findings
   (`report_finding`), fact summaries (`record_fact`), the final report, and chat responses.
   The enforcement is a code-fixed tail called `langDirective()` in `agent/prompt.go`, appended
@@ -60,7 +60,7 @@ this policy can degrade performance, so we do not accept them.
   **instructs** the model to output Korean; it does not force-lock the language. Korean fidelity
   therefore varies with the model's capability, the role, and the context. Use a capable
   (frontier-class) model when you verify localization changes. Cheap or small models can revert
-  reports and summaries to the original language (Chinese), so do not judge whether a translation
+  reports and summaries to an unintended language, so do not judge whether a translation
   is applied correctly from a cheap model's output alone. The `max_tokens` pitfall when using
   OpenAI-family models is covered in the
   [README's "Model selection and output language" section](README.en.md#model-selection-and-output-language).

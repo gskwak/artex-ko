@@ -10,8 +10,7 @@ import "testing"
 // 경로와 같은 방식). 누군가 이 리터럴을 중국어로 되돌리면 이 테스트가 실패한다.
 //
 // readEvidencePreview 의 errors.New(offset/length 검증)·이진 본문 플레이스홀더와
-// roTool("get_finding_traffic") 도구 설명은 에이전트 도구 결과로 되먹여지는 두뇌
-// 입력이라 의도적으로 원문(중국어)을 보존하며, 이 테스트의 단언 대상이 아니다.
+// roTool("get_finding_traffic") 도구 설명은 영어로 제공하며 이 테스트의 단언 대상이 아니다.
 func TestFindingTrafficErrorsLocalized(t *testing.T) {
 	for _, c := range []struct {
 		label, msg string

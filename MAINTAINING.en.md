@@ -8,10 +8,9 @@ Korean localization. Contribution scope, legal responsibility, and the localizat
 [CONTRIBUTING.en.md](CONTRIBUTING.en.md); user-facing guidance lives in [README.en.md](README.en.md).
 This document therefore focuses solely on **how that policy is actually enforced**.
 
-The core goal of the localization can be summed up in one sentence: **preserve the original's
-judgment performance exactly, while translating only the user-facing output into Korean**. That
-boundary is easy to blur every time upstream updates, so the procedures and checks below prevent
-translation drift.
+The localization keeps code and internal agent instructions in English while providing a
+Korean UI and Korean user-facing output by default. Translating internal instructions may
+change model behavior relative to upstream, so the procedures below include behavioral checks.
 
 ---
 
@@ -25,8 +24,8 @@ translate and applying each accordingly."
 
 The deliverables fall into three groups.
 
-- **Assets kept in the original language** (section 2). Translating them breaks performance or the
-  ability to diff against upstream.
+- **Assets kept in the original language** (section 2), including Chinese-edition materials
+  and technical evidence.
 - **Output-language enforcement fixed in code.** `langDirective()` in `agent/prompt.go` appends to
   the end of each role's system prompt the instruction "write user-facing output in Korean."
 - **User-facing strings that are translated into Korean.** The UI lives in `web/messages/ko.json`;
@@ -34,25 +33,20 @@ The deliverables fall into three groups.
 
 ---
 
-## 2. Assets preserved in the original language (do not translate)
+## 2. Assets preserved in the original language
 
-The following assets keep their original language (Chinese or English) and are not translated. When
-an upstream change touches these assets, **apply it as is, without translating**.
+The following assets keep their original contents. When incorporating an upstream change,
+translate Chinese explanations in the code into English while preserving original data in these assets.
 
-- **The agent's internal reasoning prompts (the "brain" body).** These are the behavioral-instruction
-  bodies in `agent/promptcatalog.go` and the DB seed `agent_prompts`. The behavior was benchmarked
-  against the original (Chinese), so translating it introduces drift in the agent's judgment.
-- **Strings that serve both as display and as agent input.** Some text that appears on the activity
-  timeline while also being fed back as planner/reporter input context (task-abort reasons,
-  interception-block messages, traffic-evidence helpers, and so on) is kept in the original, because
-  a single record serves two purposes. The rationale is recorded case by case under the "brain
-  boundary records" in `work/DECISIONS-FOR-JIWOO.md`.
 - **The original Chinese documents and strings.** Documents keep the original in `README.zh.md` and
   UI strings keep it in `web/messages/zh.json`, so that diffing against upstream changes stays easy.
   Korean translations are filled in only in `web/messages/ko.json`.
 - **Command, payload, code, URL, identifier, and log originals.** These are the originals needed for
-  analysis, so they are not translated. Go code comments are the lowest priority as well and stay in
-  the original until the upstream diff is finished.
+  analysis, so they are not translated.
+
+Keep agent behavioral instructions, stored defaults, and code comments in English. Translation
+may change model behavior relative to the Chinese original, so validate prompt changes in an
+authorized, isolated environment.
 
 ---
 
@@ -166,21 +160,21 @@ print('ko vals w/CJK:', sum(1 for v in fk.values() if isinstance(v, str) and han
 PY
 ```
 
-Baseline (2026-10-05): `ko leaf keys = 2950`, `zh leaf keys = 2950`, `key symdiff = 0`,
+Baseline (2026-10-20): `ko leaf keys = 2959`, `zh leaf keys = 2959`, `key symdiff = 0`,
 `ko vals w/CJK = 0`. The key count can grow as upstream changes are applied, but ko and zh must always
 be equal, and `key symdiff` and `ko vals w/CJK` must always be 0.
 
-### 5.2 Confirm that brain assets keep their original language
+### 5.2 Confirm that default agent prompts use English
 
-The brain body keeps the original Chinese, so if the **count of Han-character lines drops to 0** in
-the check below, that is a signal that the brain was accidentally translated and contaminated.
+Default agent prompts are maintained in English, so the count of Han-character lines in the
+check below should be 0.
 
 ```bash
 python3 -c "import re; han=re.compile(r'[㐀-鿿]'); t=open('agent/promptcatalog.go').read(); print('promptcatalog.go CJK lines =', sum(1 for l in t.splitlines() if han.search(l)))"
 ```
 
-Baseline (2026-10-05): `promptcatalog.go CJK lines = 70`. If this number drops sharply, check whether
-the brain body was translated.
+Baseline (2026-10-20): `promptcatalog.go CJK lines = 0`. Alongside this language check,
+validate tool calls, output structure, and safety boundaries when prompts change.
 
 ### 5.3 Make sure no original language leaks into the build output
 

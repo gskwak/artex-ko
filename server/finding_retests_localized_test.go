@@ -11,8 +11,7 @@ import "testing"
 //
 // 도구 설명(get_finding_retest_context·record_finding_retest_result)·파라미터 설명·
 // actool.Errorf(회차 미연결 안내)와 seedFindingRetester 의 DB 시드 에이전트 이름·
-// 프로필·note 는 에이전트가 읽는 두뇌 입력이거나 시드라 의도적으로 원문(중국어)을
-// 보존하며, 이 테스트의 단언 대상이 아니다(finding_retests.go 상수 블록 주석 참조).
+// 프로필·note 는 영어로 제공하며, 이 테스트의 단언 대상이 아니다.
 func TestFindingRetestErrorsLocalized(t *testing.T) {
 	for _, c := range []struct {
 		label, msg string

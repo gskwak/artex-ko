@@ -14,8 +14,9 @@ import (
 // action 열거값(block·allow)은 클라이언트가 그대로 주고받는 와이어 식별자라 원문을 유지한다.
 const errTaskInterceptInvalidAction = "action 은 block 또는 allow 여야 합니다"
 
-// 任务级资产拦截/允许规则的 CRUD。规则按 task_id 归属，仅对该任务生效：
-// action=block 拦截(禁止测试)，action=allow 允许(白名单)。执行判定见 db.EvaluateAssetGate。
+// CRUD for task-level asset block/allow rules. Rules belong to a task_id and
+// apply only to that task: action=block prohibits testing, while action=allow
+// adds an exception to the allowlist. See db.EvaluateAssetGate for enforcement.
 
 type taskInterceptRuleReq struct {
 	Enabled bool   `json:"enabled"`
@@ -25,7 +26,8 @@ type taskInterceptRuleReq struct {
 	Note    string `json:"note"`
 }
 
-// validateTaskInterceptRuleReq 归一并校验；复用全局规则的 kind/pattern 校验器。
+// validateTaskInterceptRuleReq normalizes and validates a request, reusing the
+// global rule validator for kind and pattern.
 func validateTaskInterceptRuleReq(req *taskInterceptRuleReq) error {
 	if req.Action == "" {
 		req.Action = "block"
@@ -37,11 +39,12 @@ func validateTaskInterceptRuleReq(req *taskInterceptRuleReq) error {
 	if err := validateAssetInterceptRuleReq(&v); err != nil {
 		return err
 	}
-	req.Pattern = v.Pattern // 已 trim
+	req.Pattern = v.Pattern // Already trimmed.
 	return nil
 }
 
-// buildTaskInterceptRules 校验创建任务时录入的任务级规则并转换为 db 输入形态。
+// buildTaskInterceptRules validates task-level rules supplied at task creation
+// and converts them to the database input type.
 func buildTaskInterceptRules(reqs []taskInterceptRuleReq) ([]db.TaskInterceptRuleInput, error) {
 	if len(reqs) == 0 {
 		return nil, nil
