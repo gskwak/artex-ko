@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { useTeamMode } from "@/hooks/use-team-mode";
 import { type FontKey, fontOptions } from "@/lib/fonts/registry";
 import type { ContentLayout, NavbarStyle, SidebarCollapsible, SidebarVariant } from "@/lib/preferences/layout";
 import {
@@ -20,15 +21,14 @@ import {
 import { PREFERENCE_DEFAULTS } from "@/lib/preferences/preferences-config";
 import { persistPreference } from "@/lib/preferences/preferences-storage";
 import { THEME_VARIANTS } from "@/lib/preferences/theme";
-import { applyThemeMode, applyThemePreset } from "@/lib/preferences/theme-utils";
+import { applyThemeMode } from "@/lib/preferences/theme-utils";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
 export function LayoutControls() {
   const t = useTranslations("appearance");
+  const { mode } = useTeamMode();
   const themeMode = usePreferencesStore((s) => s.themeMode);
   const setThemeMode = usePreferencesStore((s) => s.setThemeMode);
-  const themePreset = usePreferencesStore((s) => s.themePreset);
-  const setThemePreset = usePreferencesStore((s) => s.setThemePreset);
   const contentLayout = usePreferencesStore((s) => s.contentLayout);
   const setContentLayout = usePreferencesStore((s) => s.setContentLayout);
   const navbarStyle = usePreferencesStore((s) => s.navbarStyle);
@@ -41,13 +41,10 @@ export function LayoutControls() {
   const setFont = usePreferencesStore((s) => s.setFont);
 
   const onThemeVariantChange = (value: string) => {
-    const selected = THEME_VARIANTS.find((variant) => variant.value === value);
+    const selected = THEME_VARIANTS.find((variant) => variant.value === value && variant.preset === mode);
     if (!selected) return;
-    applyThemePreset(selected.preset);
     applyThemeMode(selected.mode);
-    setThemePreset(selected.preset);
     setThemeMode(selected.mode);
-    void persistPreference("theme_preset", selected.preset);
     void persistPreference("theme_mode", selected.mode);
   };
 
@@ -87,7 +84,7 @@ export function LayoutControls() {
   };
 
   const handleRestore = () => {
-    onThemeVariantChange(`${PREFERENCE_DEFAULTS.theme_preset}-${PREFERENCE_DEFAULTS.theme_mode}`);
+    onThemeVariantChange(`${mode}-${PREFERENCE_DEFAULTS.theme_mode}`);
     onContentLayoutChange(PREFERENCE_DEFAULTS.content_layout);
     onNavbarStyleChange(PREFERENCE_DEFAULTS.navbar_style);
     onSidebarStyleChange(PREFERENCE_DEFAULTS.sidebar_variant);
@@ -111,13 +108,13 @@ export function LayoutControls() {
           <div className="space-y-3 **:data-[slot=toggle-group]:w-full **:data-[slot=toggle-group-item]:flex-1 **:data-[slot=toggle-group-item]:text-xs">
             <div className="space-y-1">
               <Label className="font-medium text-xs">{t("theme")}</Label>
-              <Select value={`${themePreset}-${themeMode}`} onValueChange={onThemeVariantChange}>
+              <Select value={`${mode}-${themeMode}`} onValueChange={onThemeVariantChange}>
                 <SelectTrigger size="sm" className="w-full text-xs">
                   <SelectValue placeholder={t("theme")} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    {THEME_VARIANTS.map((theme) => (
+                    {THEME_VARIANTS.filter((theme) => theme.preset === mode).map((theme) => (
                       <SelectItem key={theme.value} className="text-xs" value={theme.value}>
                         <span className="size-2.5 rounded-full" style={{ backgroundColor: theme.color }} />
                         {t(theme.value)}

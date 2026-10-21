@@ -1,7 +1,7 @@
 /**
- * Boot script that reads user preference values (theme mode, theme preset,
- * content layout, navbar style) from cookies or localStorage based on the
- * configured persistence mode.
+ * Boot script that reads user preference values (theme mode, content layout,
+ * navbar style) from cookies or localStorage based on the configured
+ * persistence mode. Theme color follows the active team route or stored team.
  *
  * Runs early in <head> to apply the correct data attributes before hydration,
  * preventing layout or theme flicker and keeping RootLayout fully static.
@@ -11,7 +11,6 @@ import { PREFERENCE_DEFAULTS, PREFERENCE_PERSISTENCE } from "@/lib/preferences/p
 export function ThemeBootScript() {
   const persistence = JSON.stringify({
     theme_mode: PREFERENCE_PERSISTENCE.theme_mode,
-    theme_preset: PREFERENCE_PERSISTENCE.theme_preset,
     font: PREFERENCE_PERSISTENCE.font,
     content_layout: PREFERENCE_PERSISTENCE.content_layout,
     navbar_style: PREFERENCE_PERSISTENCE.navbar_style,
@@ -21,7 +20,6 @@ export function ThemeBootScript() {
 
   const defaults = JSON.stringify({
     theme_mode: PREFERENCE_DEFAULTS.theme_mode,
-    theme_preset: PREFERENCE_DEFAULTS.theme_preset,
     font: PREFERENCE_DEFAULTS.font,
     content_layout: PREFERENCE_DEFAULTS.content_layout,
     navbar_style: PREFERENCE_DEFAULTS.navbar_style,
@@ -70,18 +68,28 @@ export function ThemeBootScript() {
           return value;
         }
 
+        function teamFromPath(pathname) {
+          var path = pathname.replace(/\\/+$/, "") || "/";
+          if (path === "/blue" || path.startsWith("/blue/")) return "blue";
+          if (path === "/dashboard" || path.startsWith("/dashboard/") || path === "/chat" || path.startsWith("/chat/")) {
+            return "red";
+          }
+          var sharedAssets = path === "/function/assets" || path.startsWith("/function/assets/");
+          if ((path === "/function" || path.startsWith("/function/")) && !sharedAssets) return "red";
+          return null;
+        }
+
         var rawMode = readPreference("theme_mode", DEFAULTS.theme_mode);
-        var rawPreset = readPreference("theme_preset", DEFAULTS.theme_preset);
         var rawFont = readPreference("font", DEFAULTS.font);
         var rawContentLayout = readPreference("content_layout", DEFAULTS.content_layout);
         var rawNavbarStyle = readPreference("navbar_style", DEFAULTS.navbar_style);
         var rawSidebarVariant = readPreference("sidebar_variant", DEFAULTS.sidebar_variant);
         var rawSidebarCollapsible = readPreference("sidebar_collapsible", DEFAULTS.sidebar_collapsible);
 
-        // Legacy presets are retired. Reset both old color and brightness to red/light.
-        var knownPreset = rawPreset === "red" || rawPreset === "blue";
-        var preset = knownPreset ? rawPreset : DEFAULTS.theme_preset;
-        var mode = knownPreset && rawMode === "dark" ? "dark" : DEFAULTS.theme_mode;
+        // Team identity owns the accent color; a stale theme_preset cookie cannot override it.
+        var storedTeam = readLocal("artex_team_mode");
+        var preset = teamFromPath(window.location.pathname) || (storedTeam === "blue" ? "blue" : "red");
+        var mode = rawMode === "dark" ? "dark" : DEFAULTS.theme_mode;
         var resolvedMode = mode;
         var font = rawFont || DEFAULTS.font;
         var contentLayout = rawContentLayout || DEFAULTS.content_layout;
