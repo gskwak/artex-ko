@@ -198,6 +198,8 @@ export const blueApi = {
   ) => blueRequest<BlueCase>(`/cases/${id}`, json("PATCH", body)),
   events: (query?: { case_id?: number; source?: string; limit?: number; offset?: number }) =>
     blueRequest<BlueEvent[]>(withQuery("/events", query)),
+  traffic: (query?: { limit?: number; offset?: number; q?: string; source?: string; protocol?: string }) =>
+    blueRequest<{ items: BlueEvent[]; total: number }>(withQuery("/traffic", query)),
   getEvent: (id: number) => blueRequest<BlueEvent>(`/events/${id}`),
   moveEventCase: (id: number, caseID: number) =>
     blueRequest<BlueEvent>(`/events/${id}/move-case`, json("POST", { case_id: caseID })),

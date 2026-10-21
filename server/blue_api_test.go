@@ -59,6 +59,7 @@ func TestBlueAPIRequiresJWT(t *testing.T) {
 		{http.MethodGet, "/api/blue/overview", nil},
 		{http.MethodGet, "/api/blue/cases", nil},
 		{http.MethodGet, "/api/blue/events", nil},
+		{http.MethodGet, "/api/blue/traffic", nil},
 		{http.MethodGet, "/api/blue/rules", nil},
 		{http.MethodGet, "/api/blue/alerts", nil},
 		{http.MethodGet, "/api/blue/actions", nil},

@@ -169,6 +169,7 @@
       "blueDetection": "Detection",
       "blueEvents": "Events",
       "blueInvestigation": "Investigation",
+      "blueTraffic": "Traffic",
       "blueRules": "Detection rules",
       "chat": "Chat",
       "commands": "Tool runs",

@@ -54,6 +54,14 @@ const BLUE_INVESTIGATION_SEARCH_ITEMS: SearchItem[] = [
     searchOnly: true,
   },
   {
+    id: "blueTraffic",
+    headingKey: "group.function",
+    labelKey: "item.blueTraffic",
+    fallbackLabel: "Traffic",
+    url: "/blue/traffic",
+    searchOnly: true,
+  },
+  {
     id: "blueDetection",
     headingKey: "group.function",
     labelKey: "item.blueDetection",

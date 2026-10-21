@@ -41,6 +41,7 @@ func (s *Server) registerBlueRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/blue/cases/{id}", s.blueGetCase)
 	mux.HandleFunc("PATCH /api/blue/cases/{id}", s.bluePatchCase)
 	mux.HandleFunc("GET /api/blue/events", s.blueListEvents)
+	mux.HandleFunc("GET /api/blue/traffic", s.blueListTraffic)
 	mux.HandleFunc("GET /api/blue/events/{id}", s.blueGetEvent)
 	mux.HandleFunc("POST /api/blue/events/import", s.blueImportEvents)
 	mux.HandleFunc("POST /api/blue/events/{id}/move-case", s.blueMoveEventCase)

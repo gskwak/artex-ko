@@ -6,11 +6,12 @@ import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
 
-type InvestigationSection = "cases" | "events" | "detection" | "actions";
+type InvestigationSection = "cases" | "events" | "traffic" | "detection" | "actions";
 
 const sections = [
   { id: "cases", label: "blueCases", href: "/blue/cases" },
   { id: "events", label: "blueEvents", href: "/blue/events" },
+  { id: "traffic", label: "blueTraffic", href: "/blue/traffic" },
   { id: "detection", label: "blueDetection", href: "/blue/detection" },
   { id: "actions", label: "blueActions", href: "/blue/actions" },
 ] as const;

@@ -8,7 +8,15 @@ import { getClientCookie } from "@/lib/cookie.client";
 import { persistPreference } from "@/lib/preferences/preferences-storage";
 import { readTeamThemeMode, type TeamMode } from "@/lib/preferences/team-theme";
 import { applyThemeMode, applyThemePreset } from "@/lib/preferences/theme-utils";
-import { persistStoredTeamMode, readStoredTeamMode, TEAM_MODE_STORAGE_KEY, teamLandingRoute } from "@/lib/team-mode";
+import {
+  correspondingTeamRoute,
+  persistLastTeamRoute,
+  persistStoredTeamMode,
+  readLastTeamRoute,
+  readStoredTeamMode,
+  TEAM_MODE_STORAGE_KEY,
+  teamLandingRoute,
+} from "@/lib/team-mode";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
 export type { TeamMode } from "@/lib/team-mode";
@@ -69,7 +77,10 @@ export function useTeamMode() {
     setMode(next);
     syncThemePreset(next);
     syncThemeMode(next);
-    if (routeMode) persistStoredTeamMode(routeMode);
+    if (routeMode) {
+      persistStoredTeamMode(routeMode);
+      persistLastTeamRoute(routeMode, pathname + window.location.search);
+    }
   }, [pathname, syncThemeMode, syncThemePreset]);
 
   React.useEffect(() => {
@@ -97,12 +108,17 @@ export function useTeamMode() {
 
   const selectMode = React.useCallback(
     (next: TeamMode) => {
+      const currentRoute = window.location.pathname + window.location.search;
+      const currentMode = modeFromPath(window.location.pathname);
+      if (currentMode) persistLastTeamRoute(currentMode, currentRoute);
+      const destination =
+        readLastTeamRoute(next) ?? correspondingTeamRoute(window.location.pathname, next) ?? teamLandingRoute[next];
       setMode(next);
       persistStoredTeamMode(next);
       syncThemePreset(next);
       syncThemeMode(next);
       window.dispatchEvent(new CustomEvent<TeamMode>(MODE_CHANGE_EVENT, { detail: next }));
-      router.push(teamLandingRoute[next]);
+      router.push(destination);
     },
     [router, syncThemeMode, syncThemePreset],
   );
