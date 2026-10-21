@@ -12,27 +12,24 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { persistPreference } from "@/lib/preferences/preferences-storage";
+import { useTeamMode } from "@/hooks/use-team-mode";
+import { persistTeamThemeMode } from "@/lib/preferences/team-theme";
 import { THEME_VARIANTS } from "@/lib/preferences/theme";
-import { applyThemeMode, applyThemePreset } from "@/lib/preferences/theme-utils";
+import { applyThemeMode } from "@/lib/preferences/theme-utils";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
 export function ThemeSwitcher() {
   const t = useTranslations("appearance");
+  const { mode } = useTeamMode();
   const themeMode = usePreferencesStore((s) => s.themeMode);
-  const themePreset = usePreferencesStore((s) => s.themePreset);
   const setThemeMode = usePreferencesStore((s) => s.setThemeMode);
-  const setThemePreset = usePreferencesStore((s) => s.setThemePreset);
 
   const selectTheme = (value: string) => {
-    const selected = THEME_VARIANTS.find((theme) => theme.value === value);
+    const selected = THEME_VARIANTS.find((theme) => theme.value === value && theme.preset === mode);
     if (!selected) return;
-    applyThemePreset(selected.preset);
+    persistTeamThemeMode(mode, selected.mode);
     applyThemeMode(selected.mode);
-    setThemePreset(selected.preset);
     setThemeMode(selected.mode);
-    void persistPreference("theme_preset", selected.preset);
-    void persistPreference("theme_mode", selected.mode);
   };
 
   return (
@@ -44,8 +41,8 @@ export function ThemeSwitcher() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
         <DropdownMenuLabel>{t("theme")}</DropdownMenuLabel>
-        <DropdownMenuRadioGroup value={`${themePreset}-${themeMode}`} onValueChange={selectTheme}>
-          {THEME_VARIANTS.map((theme) => (
+        <DropdownMenuRadioGroup value={`${mode}-${themeMode}`} onValueChange={selectTheme}>
+          {THEME_VARIANTS.filter((theme) => theme.preset === mode).map((theme) => (
             <DropdownMenuRadioItem key={theme.value} value={theme.value}>
               <span className="size-3 rounded-full" style={{ backgroundColor: theme.color }} />
               {t(theme.value)}

@@ -153,6 +153,7 @@
   },
   "nav": {
     "group": {
+      "blue": "기능",
       "function": "기능",
       "system": "시스템"
     },
@@ -161,6 +162,15 @@
       "approvals": "승인 기록",
       "asset-intercept": "자산 차단",
       "assets": "자산",
+      "blueActions": "대응 조치",
+      "blueAlerts": "경보",
+      "blueCases": "사건",
+      "blueDashboard": "대시보드",
+      "blueDetection": "탐지",
+      "blueEvents": "이벤트",
+      "blueInvestigation": "조사",
+      "blueTraffic": "트래픽",
+      "blueRules": "탐지 규칙",
       "chat": "대화",
       "commands": "도구 실행",
       "dashboard": "대시보드",
@@ -179,6 +189,13 @@
       "traffic": "트래픽",
       "workspace": "작업 공간"
     }
+  },
+  "teamMode": {
+    "label": "팀 모드",
+    "red": "레드팀",
+    "blue": "블루팀",
+    "switchToRed": "레드팀으로 전환",
+    "switchToBlue": "블루팀으로 전환"
   },
   "notFound": {
     "back": "홈으로 돌아가기",
@@ -953,6 +970,10 @@
       "triggers": "트리거"
     },
     "notFound": "에이전트를 찾을 수 없습니다: {key}",
+    "blueAnalyst": {
+      "description": "블루팀 분석가는 증거를 검토하고 방어 관점의 평가를 작성합니다. 선택한 모델을 직접 호출하며 셸, MCP, Skill, 도구, 트리거는 사용하지 않습니다.",
+      "modelHint": "방어 분석에 사용할 모델을 선택한 뒤 설정을 저장하세요. 기본 옵션은 현재 활성화된 LLM 설정을 따릅니다."
+    },
     "llm": {
       "label": "기본 모델 (LLM 설정)",
       "follow": "작업 / 전역 활성 설정 따르기",
@@ -1855,6 +1876,8 @@
     "empty": "(에이전트가 없습니다)",
     "new": "새 에이전트",
     "badgeBuiltin": "기본 제공",
+    "badgeBlueAnalyst": "블루팀 분석가",
+    "blueAnalystDescription": "도구 실행 없이 LLM으로 방어 분석을 수행합니다. 아래에서 모델과 프롬프트를 편집하세요.",
     "badgeCustom": "사용자 정의",
     "badgeDisabled": "비활성화됨",
     "noDescription": "(설명 없음)",

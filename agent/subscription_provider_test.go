@@ -85,3 +85,32 @@ func TestSubscriptionProfilesIgnoreAPISecretsAndEndpoints(t *testing.T) {
 		}
 	}
 }
+
+func TestSubscriptionTransportsAcceptToolFreeAnalystRequest(t *testing.T) {
+	req := llm.CompletionRequest{
+		System:   []string{"Read stored evidence only", "Return cited JSON"},
+		Messages: []llm.Message{llm.UserText(`{"case_id":1,"events":[]}`)},
+	}
+	chatGPTWire, err := chatGPTBody("model", "", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(chatGPTWire, &body); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := body["tools"]; ok {
+		t.Fatal("tool-free ChatGPT request advertised tools")
+	}
+	if !strings.Contains(body["instructions"].(string), "Return cited JSON") {
+		t.Fatal("analyst system contract was not forwarded to ChatGPT")
+	}
+	claudeRaw := []byte(`{"subtype":"success","structured_output":{"text":"{\"verdict\":\"inconclusive\"}","tool_calls":[]}}`)
+	if _, _, err := decodeClaude(claudeRaw, nil); err != nil {
+		t.Fatalf("tool-free Claude response was rejected: %v", err)
+	}
+	claudeToolCall := []byte(`{"subtype":"success","structured_output":{"text":"check","tool_calls":[{"name":"Bash","arguments":"{}"}]}}`)
+	if _, _, err := decodeClaude(claudeToolCall, nil); err == nil {
+		t.Fatal("Claude attempted a tool when no tools were available")
+	}
+}

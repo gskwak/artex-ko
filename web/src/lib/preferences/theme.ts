@@ -1,4 +1,5 @@
 export const THEME_MODE_VALUES = ["light", "dark"] as const;
+export const TEAM_THEME_MODE_COOKIE_PREFIX = "artex_theme_mode_";
 export type ThemeMode = (typeof THEME_MODE_VALUES)[number];
 export type ResolvedThemeMode = ThemeMode;
 

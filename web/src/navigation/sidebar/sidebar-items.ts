@@ -17,6 +17,7 @@ import {
   ScrollText,
   Settings2,
   ShieldAlert,
+  ShieldCheck,
   Sparkles,
   Target,
   Terminal,
@@ -46,6 +47,7 @@ interface NavItemBase {
 
 export interface NavMainLinkItem extends NavItemBase {
   url: string;
+  activeUrls?: string[];
   subItems?: never;
 }
 
@@ -61,38 +63,66 @@ export interface NavGroup {
   items: NavMainItem[];
 }
 
-export const sidebarItems: NavGroup[] = [
+// Both team modes use the same System group so its placement and item order cannot drift.
+const systemGroup: NavGroup = {
+  id: 2,
+  label: "System",
+  items: [
+    { id: "llm", title: "LLM", url: "/system/llm", icon: Brain },
+    { id: "agents", title: "Agent", url: "/system/agents", icon: Bot },
+    { id: "mcp", title: "MCP", url: "/system/mcp", icon: Plug },
+    { id: "skills", title: "Skill", url: "/system/skills", icon: Sparkles },
+    { id: "tools", title: "Tools", url: "/system/tools", icon: Wrench },
+    { id: "notify", title: "Notifications", url: "/system/notify", icon: BellRing },
+    { id: "intercept", title: "Intercept rules", url: "/system/intercept", icon: ShieldAlert },
+    { id: "asset-intercept", title: "Asset intercept", url: "/system/intercept/assets", icon: Ban },
+    { id: "approvals", title: "Approval records", url: "/system/intercept/approvals", icon: ClipboardList },
+    { id: "logs", title: "Logs", url: "/system/logs", icon: ScrollText },
+    { id: "settings", title: "System settings", url: "/system/settings", icon: Settings2 },
+  ],
+};
+
+export const redSidebarItems: NavGroup[] = [
   {
     id: 1,
     label: "Features",
     items: [
-      { id: "dashboard", title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-      { id: "chat", title: "Chat", url: "/chat", icon: MessageSquare },
-      { id: "tasks", title: "Tasks", url: "/function/tasks", icon: Target },
-      { id: "findings", title: "Findings", url: "/function/findings", icon: Bug },
-      { id: "traffic", title: "Traffic", url: "/function/traffic", icon: Activity },
-      { id: "commands", title: "Tool executions", url: "/function/commands", icon: Terminal },
-      { id: "llm-records", title: "LLM records", url: "/function/llm-records", icon: Radio },
-      { id: "assets", title: "Assets", url: "/function/assets", icon: Network },
-      { id: "sync", title: "Asset sync", url: "/function/sync", icon: FolderSync },
-      { id: "workspace", title: "Workspace", url: "/function/workspace", icon: FolderOpen },
+      { id: "dashboard", title: "Dashboard", url: "/redteam/dashboard", icon: LayoutDashboard },
+      { id: "chat", title: "Chat", url: "/redteam/chat", icon: MessageSquare },
+      { id: "tasks", title: "Tasks", url: "/redteam/tasks", icon: Target },
+      { id: "findings", title: "Findings", url: "/redteam/findings", icon: Bug },
+      { id: "traffic", title: "Traffic", url: "/redteam/traffic", icon: Activity },
+      { id: "commands", title: "Tool executions", url: "/redteam/commands", icon: Terminal },
+      { id: "llm-records", title: "LLM records", url: "/redteam/llm-records", icon: Radio },
+      { id: "assets", title: "Assets", url: "/redteam/assets", icon: Network },
+      { id: "sync", title: "Asset sync", url: "/redteam/sync", icon: FolderSync },
+      { id: "workspace", title: "Workspace", url: "/redteam/workspace", icon: FolderOpen },
     ],
   },
-  {
-    id: 2,
-    label: "System",
-    items: [
-      { id: "llm", title: "LLM", url: "/system/llm", icon: Brain },
-      { id: "agents", title: "Agent", url: "/system/agents", icon: Bot },
-      { id: "mcp", title: "MCP", url: "/system/mcp", icon: Plug },
-      { id: "skills", title: "Skill", url: "/system/skills", icon: Sparkles },
-      { id: "tools", title: "Tools", url: "/system/tools", icon: Wrench },
-      { id: "notify", title: "Notifications", url: "/system/notify", icon: BellRing },
-      { id: "intercept", title: "Intercept rules", url: "/system/intercept", icon: ShieldAlert },
-      { id: "asset-intercept", title: "Asset intercept", url: "/system/intercept/assets", icon: Ban },
-      { id: "approvals", title: "Approval records", url: "/system/intercept/approvals", icon: ClipboardList },
-      { id: "logs", title: "Logs", url: "/system/logs", icon: ScrollText },
-      { id: "settings", title: "System settings", url: "/system/settings", icon: Settings2 },
-    ],
-  },
+  systemGroup,
 ];
+
+export const blueSidebarItems: NavGroup[] = [
+  {
+    id: 1,
+    label: "Features",
+    items: [
+      { id: "blueDashboard", title: "Dashboard", url: "/blue/dashboard", icon: LayoutDashboard },
+      { id: "chat", title: "Chat", url: "/blue/chat", icon: MessageSquare },
+      { id: "tasks", title: "Tasks", url: "/blue/tasks", icon: Target },
+      {
+        id: "blueInvestigation",
+        title: "Investigation",
+        url: "/blue/cases",
+        activeUrls: ["/blue/events", "/blue/traffic", "/blue/detection", "/blue/actions"],
+        icon: ShieldCheck,
+      },
+      { id: "llm-records", title: "LLM records", url: "/blue/llm-records", icon: Radio },
+      { id: "assets", title: "Assets", url: "/blue/assets", icon: Network },
+    ],
+  },
+  systemGroup,
+];
+
+// Keep the original export for consumers that still render the red-team menu.
+export const sidebarItems = redSidebarItems;

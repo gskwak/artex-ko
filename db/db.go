@@ -218,6 +218,9 @@ var builtinAgents = []builtinAgent{
 	// the chat page. It plans, executes, and verifies the full workflow itself.
 	// The interactive shell is enabled by default.
 	{"pentest", "Penetration testing", "assistant", "Independent penetration testing agent: reconnoiter, identify attack surfaces, investigate and exploit, verify results, and wrap up; plan, execute, and challenge its own findings.", nil, true, intp(0)},
+	// Blue analyst runs only through the case-analysis direct-LLM path. A unique
+	// role keeps it out of the general conversational SDK and its tool bindings.
+	{"blue_analyst", "Blue analyst", "blue_analyst", "Analyze stored case evidence, separate facts from hypotheses, and propose detection and response steps with verified citations.", nil, false, nil},
 }
 
 // seedBuiltins inserts the fixed built-in agents and their variable catalog (idempotent).
@@ -242,6 +245,13 @@ ON CONFLICT (agent_id, var_name) DO UPDATE
 				return fmt.Errorf("agent %s var %s: %w", a.key, v.name, err)
 			}
 		}
+	}
+	// Reserve the analyst key even on databases where a user previously created
+	// a custom agent with that key. Model/profile and prompt edits are preserved;
+	// the dedicated role prevents generic chat and tool-execution paths.
+	if _, err := d.Exec(`UPDATE agents SET role='blue_analyst', builtin=true,
+		interactive_shell=false, web_search=false WHERE key='blue_analyst'`); err != nil {
+		return fmt.Errorf("reserve blue analyst role: %w", err)
 	}
 	// Drop catalog entries for variables that were renamed, so the white-list no
 	// longer advertises a name templates can't resolve (EngagementTitle→Description).

@@ -34,19 +34,24 @@ const (
 // convRetest* 상수·transcriptErrorSummary 로 분리했다(F9). 트리거 메시지 골격은 아직
 // 이 묶음 밖이다(F10·저널 참조). 로그·주석은 BRIEF 방침상 최하위.
 const (
-	convErrRequestTooLarge = "요청 본문이 너무 큽니다"
-	convErrAgentKeyEmpty   = "agent_key 는 비어 있을 수 없습니다"
-	convErrAgentKeyTooLong = "agent_key 는 최대 %d자까지 입력할 수 있습니다"
-	convErrAgentNotFound   = "에이전트를 찾을 수 없습니다"
-	convErrLLMProfile      = "지정한 LLM 설정이 존재하지 않거나 API Key 가 설정되지 않았습니다"
-	convErrTitleTooLong    = "제목은 최대 %d자까지 입력할 수 있습니다"
-	convErrTitleOrPinned   = "title 또는 pinned 중 하나 이상을 제공해야 합니다"
-	convErrTitleEmpty      = "제목은 비어 있을 수 없습니다"
-	convErrBadConvID       = "대화 id 가 올바르지 않습니다"
-	convErrIDsCount        = "ids 개수는 1에서 %d 사이여야 합니다"
-	convErrMessageEmpty    = "메시지는 비어 있을 수 없습니다"
-	convErrBusy            = "이 대화가 이전 메시지를 처리하고 있습니다. 잠시 기다려 주세요"
+	convErrRequestTooLarge  = "요청 본문이 너무 큽니다"
+	convErrAgentKeyEmpty    = "agent_key 는 비어 있을 수 없습니다"
+	convErrAgentKeyTooLong  = "agent_key 는 최대 %d자까지 입력할 수 있습니다"
+	convErrAgentNotFound    = "에이전트를 찾을 수 없습니다"
+	convErrLLMProfile       = "지정한 LLM 설정이 존재하지 않거나 API Key 가 설정되지 않았습니다"
+	convErrTitleTooLong     = "제목은 최대 %d자까지 입력할 수 있습니다"
+	convErrTitleOrPinned    = "title 또는 pinned 중 하나 이상을 제공해야 합니다"
+	convErrTitleEmpty       = "제목은 비어 있을 수 없습니다"
+	convErrBadConvID        = "대화 id 가 올바르지 않습니다"
+	convErrIDsCount         = "ids 개수는 1에서 %d 사이여야 합니다"
+	convErrMessageEmpty     = "메시지는 비어 있을 수 없습니다"
+	convErrBusy             = "이 대화가 이전 메시지를 처리하고 있습니다. 잠시 기다려 주세요"
+	convErrBlueAnalysisOnly = "블루 분석 에이전트는 사건 분석에서만 사용할 수 있습니다"
 )
+
+func blueAnalysisOnlyAgent(a *db.Agent, key string) bool {
+	return key == "blue_analyst" || (a != nil && a.Role == "blue_analyst")
+}
 
 // 대화 기본 제목. convDefaultTitle 은 표시 문구이자 센티넬이다. 대화를 만들 때 제목으로
 // 쓰고, 첫 사용자 메시지가 오면 제목이 비었거나 이 값일 때만 자동 제목으로 덮어쓴다
@@ -114,6 +119,9 @@ func (s *Server) pgListConversations(w http.ResponseWriter, r *http.Request) {
 	items := make([]conversationListItem, 0, len(cs))
 	s.chatMu.Lock()
 	for _, c := range cs {
+		if c.AgentKey == blueChatAgentKey {
+			continue
+		}
 		items = append(items, conversationListItem{Conversation: c, Running: s.chatBusy[s.convBusyKey(c.ID)]})
 	}
 	s.chatMu.Unlock()
@@ -149,6 +157,10 @@ func (s *Server) pgCreateConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	if a == nil {
 		writeErr(w, 404, convErrAgentNotFound)
+		return
+	}
+	if blueAnalysisOnlyAgent(a, req.AgentKey) {
+		writeErr(w, http.StatusForbidden, convErrBlueAnalysisOnly)
 		return
 	}
 	if req.LLMProfileID != nil {
@@ -215,6 +227,10 @@ func (s *Server) convByID(w http.ResponseWriter, r *http.Request) (*db.DB, *db.C
 	}
 	if c == nil {
 		writeErr(w, 404, "conversation not found")
+		return nil, nil, false
+	}
+	if c.AgentKey == blueChatAgentKey && !strings.HasPrefix(r.URL.Path, "/api/blue/conversations/") {
+		writeErr(w, http.StatusNotFound, "conversation not found")
 		return nil, nil, false
 	}
 	return pg, c, true
@@ -322,6 +338,17 @@ func (s *Server) pgDeleteConversationsBatch(w http.ResponseWriter, r *http.Reque
 	if len(ids) == 0 || len(ids) > maxConversationDeleteBatch {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf(convErrIDsCount, maxConversationDeleteBatch))
 		return
+	}
+	for _, id := range ids {
+		c, err := pg.GetConversation(id)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if c != nil && c.AgentKey == blueChatAgentKey {
+			writeErr(w, http.StatusNotFound, "conversation not found")
+			return
+		}
 	}
 	for _, id := range ids {
 		s.cancelConversation(id)
@@ -438,6 +465,21 @@ func (s *Server) pgStopConversation(w http.ResponseWriter, r *http.Request) {
 func (s *Server) pgSendConversationMessage(w http.ResponseWriter, r *http.Request) {
 	pg, c, ok := s.convByID(w, r)
 	if !ok {
+		return
+	}
+	// A legacy or directly forged conversation must never send the defensive
+	// analyst through ChatAgent, which has general-purpose tools.
+	a, err := pg.GetAgentByKey(c.AgentKey)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load conversation agent")
+		return
+	}
+	if blueAnalysisOnlyAgent(a, c.AgentKey) {
+		writeErr(w, http.StatusForbidden, convErrBlueAnalysisOnly)
+		return
+	}
+	if a == nil {
+		writeErr(w, http.StatusNotFound, convErrAgentNotFound)
 		return
 	}
 	var req struct {
@@ -562,6 +604,14 @@ func (s *Server) runConversationTurn(ctx context.Context, cancel context.CancelC
 		delete(s.chatCancel, busyKey)
 		s.chatMu.Unlock()
 	}()
+	if s.m.pg == nil {
+		return
+	}
+	runAgent, err := s.m.pg.GetAgentByKey(c.AgentKey)
+	if err != nil || runAgent == nil || blueAnalysisOnlyAgent(runAgent, c.AgentKey) {
+		log.Printf("[conv %d] refused generic agent run for %q: %v", c.ID, c.AgentKey, err)
+		return
+	}
 	// Only the first turn executes a historical retest. Follow-up conversation
 	// turns may explain the sealed result; the result tool refuses to overwrite it.
 	finishStatus, finishReason := "failed", convRetestFailedToStart
@@ -609,10 +659,7 @@ func (s *Server) runConversationTurn(ctx context.Context, cancel context.CancelC
 	pg := s.m.pg
 	maxTurns := s.agentMaxTurns(c.AgentKey)
 	maxDuration := time.Duration(s.agentRunSeconds(c.AgentKey)) * time.Second
-	webSearch := false
-	if a, err := pg.GetAgentByKey(c.AgentKey); err == nil && a != nil {
-		webSearch = a.WebSearch
-	}
+	webSearch := runAgent.WebSearch
 	sessionID := s.convBusyKey(c.ID) // "conv-<id>" transcript session
 	emit := func(rec db.Activity) {
 		if _, err := pg.AppendConvActivity(c.ID, rec); err != nil {
@@ -670,6 +717,11 @@ func (s *Server) readTriggerBehavior(agentKey string) triggerBehavior {
 // conversation up to trigger_max_parallel. Distinct agents always run concurrently.
 func (s *Server) StartTriggeredRun(agentKey, title, message string, taskID int64, mergeable bool, taskDesc, taskGoal string) {
 	if s.m.pg == nil || s.chatAgentRef() == nil {
+		return
+	}
+	a, err := s.m.pg.GetAgentByKey(agentKey)
+	if err != nil || a == nil || blueAnalysisOnlyAgent(a, agentKey) {
+		log.Printf("[trigger] refused generic run for %q: %v", agentKey, err)
 		return
 	}
 	cfg := s.readTriggerBehavior(agentKey) // DB read BEFORE the lock (never under queueMu)

@@ -5,10 +5,9 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { ChevronRight, MailIcon, PlusCircleIcon } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
@@ -89,7 +88,7 @@ function hasSubItems(item: NavMainItem): item is NavMainParentItem {
 
 // 그룹 번호 → nav.group.* 메시지 키. 사이드바 라벨은 데이터(sidebar-items.ts)가 아니라
 // 렌더 시점에 useTranslations 로 번역한다. 매핑이 없는 그룹은 원문 label 로 떨어진다.
-const GROUP_MESSAGE_KEY: Record<number, string> = { 1: "function", 2: "system" };
+const GROUP_MESSAGE_KEY: Record<number, string> = { 1: "function", 2: "system", 3: "blue" };
 
 export function NavMain({ items }: NavMainProps) {
   const t = useTranslations("nav");
@@ -98,26 +97,28 @@ export function NavMain({ items }: NavMainProps) {
   // Decode before comparing with the navigation URL so the active item is highlighted.
   const path = (() => {
     try {
-      return decodeURIComponent(rawPath);
+      return decodeURIComponent(rawPath).replace(/\/+$/, "") || "/";
     } catch {
-      return rawPath;
+      return rawPath.replace(/\/+$/, "") || "/";
     }
   })();
 
+  const matchesRoute = (url: string) => path === url || path.startsWith(`${url}/`);
+
   const isItemActive = (item: NavMainItem) => {
     if (hasSubItems(item)) {
-      return item.subItems.some((sub) => path.startsWith(sub.url));
+      return item.subItems.some((sub) => matchesRoute(sub.url));
     }
 
-    return path === item.url;
+    return [item.url, ...(item.activeUrls ?? [])].some(matchesRoute);
   };
 
   const isSubItemActive = (url: string) => {
-    return path === url;
+    return matchesRoute(url);
   };
 
   const isSubmenuOpen = (item: NavMainParentItem) => {
-    return item.subItems.some((sub) => path.startsWith(sub.url));
+    return item.subItems.some((sub) => matchesRoute(sub.url));
   };
 
   return (
@@ -133,7 +134,7 @@ export function NavMain({ items }: NavMainProps) {
             <SidebarMenu>
               {group.items.map((item) => (
                 <NavItem
-                  key={item.id}
+                  key={`${item.id}-${hasSubItems(item) && isSubmenuOpen(item)}`}
                   item={item}
                   isItemActive={isItemActive}
                   isSubItemActive={isSubItemActive}

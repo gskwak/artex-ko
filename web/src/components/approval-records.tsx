@@ -69,10 +69,10 @@ function ApprovalOrigin({ row, detail = false }: { row: InterceptApprovalRow; de
   let href: string | undefined;
   if (row.conversation_id) {
     query.set("c", String(row.conversation_id));
-    href = `/chat?${query}`;
+    href = `/redteam/chat?${query}`;
   } else if (row.task_id) {
     query.set("id", row.task_id);
-    href = `/function/tasks/detail?${query}`;
+    href = `/redteam/tasks/detail?${query}`;
   }
   return href ? (
     <a

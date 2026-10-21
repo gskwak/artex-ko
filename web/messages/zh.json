@@ -153,6 +153,7 @@
   },
   "nav": {
     "group": {
+      "blue": "功能",
       "function": "功能",
       "system": "系统"
     },
@@ -161,6 +162,15 @@
       "approvals": "审批记录",
       "asset-intercept": "资产拦截",
       "assets": "资产",
+      "blueActions": "响应操作",
+      "blueAlerts": "告警",
+      "blueCases": "案件",
+      "blueDashboard": "仪表盘",
+      "blueDetection": "检测",
+      "blueEvents": "事件",
+      "blueInvestigation": "调查",
+      "blueTraffic": "流量",
+      "blueRules": "检测规则",
       "chat": "对话",
       "commands": "工具执行",
       "dashboard": "仪表盘",
@@ -179,6 +189,13 @@
       "traffic": "流量",
       "workspace": "工作空间"
     }
+  },
+  "teamMode": {
+    "label": "团队模式",
+    "red": "红队",
+    "blue": "蓝队",
+    "switchToRed": "切换到红队",
+    "switchToBlue": "切换到蓝队"
   },
   "notFound": {
     "back": "Go back home",
@@ -953,6 +970,10 @@
       "triggers": "触发"
     },
     "notFound": "未找到 Agent：{key}",
+    "blueAnalyst": {
+      "description": "蓝队分析员审查证据并撰写防御性评估。它直接调用所选模型，不使用 Shell、MCP、技能、工具或触发器。",
+      "modelHint": "选择用于防御分析的模型，然后保存设置。默认选项沿用当前启用的 LLM 配置。"
+    },
     "llm": {
       "label": "默认模型（LLM 配置）",
       "follow": "跟随任务 / 全局激活配置",
@@ -1855,6 +1876,8 @@
     "empty": "（暂无 Agent）",
     "new": "新建 Agent",
     "badgeBuiltin": "内置",
+    "badgeBlueAnalyst": "蓝队分析员",
+    "blueAnalystDescription": "通过 LLM 进行防御分析，不执行工具。可在下方编辑模型和提示词。",
     "badgeCustom": "自定义",
     "badgeDisabled": "已停用",
     "noDescription": "（无描述）",

@@ -154,7 +154,7 @@ export function RetestsTab({ taskId }: { taskId: string }) {
                   {findingLabel(selected, t("findings.unclassified"))}
                 </h2>
                 <Button asChild variant="ghost" size="sm">
-                  <Link href={`/function/findings/detail?id=${selected.finding_id || selected.id}`}>
+                  <Link href={`/redteam/findings/detail?id=${selected.finding_id || selected.id}`}>
                     {t("retests.findingDetail")} <ArrowUpRightIcon data-icon="inline-end" />
                   </Link>
                 </Button>

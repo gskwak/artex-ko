@@ -477,9 +477,9 @@ func (n *Notifier) itemFor(ctx context.Context, snap notify.Snapshot, baseURL st
 		ToStatus:   snap.ToStatus,
 	}
 	if baseURL != "" {
-		// The details route is in web/src/app/(main)/function/findings/detail/page.tsx;
+		// The details route is in web/src/app/(main)/redteam/findings/detail/page.tsx;
 		// it reads the finding ID from the id query parameter.
-		item.DetailURL = fmt.Sprintf("%s/function/findings/detail?id=%d", baseURL, snap.FindingID)
+		item.DetailURL = fmt.Sprintf("%s/redteam/findings/detail?id=%d", baseURL, snap.FindingID)
 	}
 	return item, nil
 }

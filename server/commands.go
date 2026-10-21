@@ -1,6 +1,8 @@
 package server
 
 import (
+	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -69,6 +71,55 @@ func (s *Server) pgListLLMRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"records": records, "total": total})
+}
+
+// Blue records are selected before pagination and scoped again for detail.
+// The shared recorder is optional and uses a global setting, but the Blue
+// audit view must never show Red Team requests or responses.
+func (s *Server) blueListLLMRecords(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	q := r.URL.Query()
+	page := atoiDefault(q.Get("page"), 0)
+	if page < 0 {
+		page = 0
+	}
+	size := atoiDefault(q.Get("size"), 50)
+	if size <= 0 || size > 100 {
+		size = 50
+	}
+	records, total, err := pg.ListBlueLLMRecords(q.Get("model"), q.Get("session"), page, size)
+	if err != nil {
+		blueInternal(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"records": records, "total": total, "recording_enabled": s.m.LLMRecordEnabled(),
+	})
+}
+
+func (s *Server) blueGetLLMRecord(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	record, err := pg.GetBlueLLMRecord(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeErr(w, http.StatusNotFound, "record not found")
+		return
+	}
+	if err != nil {
+		blueInternal(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, record)
 }
 
 // pgTokenByModel returns a task's LLM token usage grouped by model, from the

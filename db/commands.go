@@ -220,6 +220,19 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 
 // ListLLMRecords returns paginated LLM records with optional filters.
 func (d *DB) ListLLMRecords(model, session, task string, page, size int) ([]LLMRecord, int, error) {
+	return d.listLLMRecords(model, session, task, page, size, false)
+}
+
+// ListBlueLLMRecords returns only calls tagged by a Blue Team runtime session.
+// Scope is applied in SQL before counting and pagination so red-team records
+// cannot displace Blue records from a page.
+func (d *DB) ListBlueLLMRecords(model, session string, page, size int) ([]LLMRecord, int, error) {
+	return d.listLLMRecords(model, session, "", page, size, true)
+}
+
+const blueLLMRecordScope = `(session_id LIKE 'blue-case-%' OR session_id LIKE 'blue-chat-%')`
+
+func (d *DB) listLLMRecords(model, session, task string, page, size int, blueOnly bool) ([]LLMRecord, int, error) {
 	if size <= 0 {
 		size = 50
 	}
@@ -229,6 +242,9 @@ func (d *DB) ListLLMRecords(model, session, task string, page, size int) ([]LLMR
 	offset := page * size
 
 	where := `WHERE true`
+	if blueOnly {
+		where += ` AND ` + blueLLMRecordScope
+	}
 	args := []any{}
 	argN := 1
 	if model != "" {
@@ -326,12 +342,25 @@ func (d *DB) DeleteLLMRecords(task string) (int64, error) {
 
 // GetLLMRecord returns a single LLM record with full request/response bodies.
 func (d *DB) GetLLMRecord(id int64) (*LLMRecord, error) {
+	return d.getLLMRecord(id, false)
+}
+
+// GetBlueLLMRecord enforces the same scope on details as the Blue list.
+func (d *DB) GetBlueLLMRecord(id int64) (*LLMRecord, error) {
+	return d.getLLMRecord(id, true)
+}
+
+func (d *DB) getLLMRecord(id int64, blueOnly bool) (*LLMRecord, error) {
 	var r LLMRecord
 	var reqBody, respBody, rawReq, rawResp sql.NullString
-	err := d.QueryRow(`SELECT id, ts, COALESCE(model,''), COALESCE(profile_name,''), COALESCE(session_id,''), COALESCE(task_id,''), COALESCE(worker,''),
+	query := `SELECT id, ts, COALESCE(model,''), COALESCE(profile_name,''), COALESCE(session_id,''), COALESCE(task_id,''), COALESCE(worker,''),
 		COALESCE(latency_ms,0), COALESCE(input_tokens,0), COALESCE(output_tokens,0), COALESCE(cache_read,0), COALESCE(cache_write,0),
 		COALESCE(status,''), COALESCE(error,''), request_body, response_body, raw_request, raw_response
-		FROM llm_records WHERE id=$1`, id).
+		FROM llm_records WHERE id=$1`
+	if blueOnly {
+		query += ` AND ` + blueLLMRecordScope
+	}
+	err := d.QueryRow(query, id).
 		Scan(&r.ID, &r.Ts, &r.Model, &r.ProfileName, &r.SessionID, &r.TaskID, &r.Worker, &r.LatencyMs,
 			&r.InputTokens, &r.OutputTokens, &r.CacheRead, &r.CacheWrite, &r.Status, &r.Error,
 			&reqBody, &respBody, &rawReq, &rawResp)

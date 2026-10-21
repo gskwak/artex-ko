@@ -1,6 +1,5 @@
-import { redirect } from "next/navigation";
+import { LegacyTeamRouteRedirect } from "@/components/legacy-team-route-redirect";
 
 export default function Home() {
-  redirect("/function/tasks");
-  return <>Coming Soon</>;
+  return <LegacyTeamRouteRedirect redTarget="/redteam/tasks" blueTarget="/blue/dashboard" />;
 }

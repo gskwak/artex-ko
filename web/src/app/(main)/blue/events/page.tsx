@@ -1,0 +1,895 @@
+"use client";
+
+import * as React from "react";
+
+import Link from "next/link";
+
+import { FileText, RefreshCw, Upload } from "lucide-react";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useActiveLocale } from "@/i18n/locale-store";
+import { ApiError } from "@/lib/api";
+import { type BlueCase, type BlueEvent, type BlueImportResult, type BlueSeverity, blueApi } from "@/lib/blue-api";
+import { type BlueAsset, type BlueAssetEvent, blueAssetsApi } from "@/lib/blue-assets-api";
+import { blueSeverityLabel, useBlueCopy } from "@/lib/blue-copy";
+
+import { BlueSourcesPanel } from "../_components/blue-sources-panel";
+import { BlueEmpty, BlueError, BlueLoading, BluePageHeader, BlueSeverityBadge, blueDate } from "../_components/blue-ui";
+import { BlueInvestigationTabs } from "../_components/investigation-tabs";
+
+const MAX_FILE_BYTES = 8 * 1024 * 1024;
+const PAGE_SIZE = 100;
+const SUPPORTED_EXTENSION = /\.(json|jsonl|ndjson|csv)$/i;
+
+const eventLabels = {
+  en: {
+    eventsSaved: "Events saved",
+    alertsCreated: "Alerts created",
+    detectionErrors: "Detection errors",
+    importComplete: "Import completed.",
+    importPartial: "Events were saved, but some detection rules failed.",
+    ruleWarnings: "Detection warnings",
+    assignCase: "Connect to case",
+    changeCase: "Change case",
+    chooseCase: "Choose a case",
+    anyCaseID: "Enter any case ID, including older cases.",
+    saveCaseLink: "Save case link",
+    caseLinked: "Event and related alerts linked to the case.",
+    caseMoveFailed: "Could not update the event's case.",
+    caseMoveConflict:
+      "This event or a related alert is cited as evidence. Review its references before changing the case.",
+    createCase: "Create a case",
+    noCases: "No cases are available yet.",
+    linkedAsset: "Linked Blue asset",
+    observedAsset: "Observed asset text",
+    noLinkedAsset: "No asset linked",
+    saveAssetLink: "Save asset link",
+    assetLinked: "Event asset link saved.",
+    assetLinkFailed: "Could not update the asset link.",
+    assetsUnavailable: "Could not load Blue assets.",
+    archivedAsset: "archived",
+    manageAssets: "Manage assets",
+    searchAssets: "Search Blue assets to link",
+  },
+  ko: {
+    eventsSaved: "저장된 이벤트",
+    alertsCreated: "생성된 경보",
+    detectionErrors: "탐지 오류",
+    importComplete: "이벤트 가져오기가 완료되었습니다.",
+    importPartial: "이벤트는 저장됐지만 일부 탐지 규칙 실행에 실패했습니다.",
+    ruleWarnings: "탐지 경고",
+    assignCase: "사건에 연결",
+    changeCase: "사건 변경",
+    chooseCase: "사건 선택",
+    anyCaseID: "오래된 사건도 ID를 입력해 연결할 수 있습니다.",
+    saveCaseLink: "사건 연결 저장",
+    caseLinked: "이벤트와 관련 경보를 사건에 연결했습니다.",
+    caseMoveFailed: "이벤트의 사건 연결을 변경하지 못했습니다.",
+    caseMoveConflict: "이 이벤트 또는 관련 경보가 이미 증거로 인용됐습니다. 사건을 바꾸기 전에 증거 참조를 확인하세요.",
+    createCase: "사건 만들기",
+    noCases: "아직 사건이 없습니다.",
+    linkedAsset: "연결된 블루팀 자산",
+    observedAsset: "원본 자산 문자열",
+    noLinkedAsset: "연결된 자산 없음",
+    saveAssetLink: "자산 연결 저장",
+    assetLinked: "이벤트 자산 연결을 저장했습니다.",
+    assetLinkFailed: "자산 연결을 변경하지 못했습니다.",
+    assetsUnavailable: "블루팀 자산 목록을 불러오지 못했습니다.",
+    archivedAsset: "보관됨",
+    manageAssets: "자산 관리",
+    searchAssets: "연결할 블루팀 자산 검색",
+  },
+  zh: {
+    eventsSaved: "已保存事件",
+    alertsCreated: "已创建告警",
+    detectionErrors: "检测错误",
+    importComplete: "事件导入完成。",
+    importPartial: "事件已保存，但部分检测规则执行失败。",
+    ruleWarnings: "检测警告",
+    assignCase: "关联案件",
+    changeCase: "更改案件",
+    chooseCase: "选择案件",
+    anyCaseID: "输入任意案件 ID，包括较早的案件。",
+    saveCaseLink: "保存案件关联",
+    caseLinked: "事件及相关告警已关联到案件。",
+    caseMoveFailed: "无法更新事件所属案件。",
+    caseMoveConflict: "该事件或相关告警已被引用为证据。更改案件前请检查证据引用。",
+    createCase: "创建案件",
+    noCases: "尚无可用案件。",
+    linkedAsset: "关联的蓝队资产",
+    observedAsset: "原始资产文本",
+    noLinkedAsset: "未关联资产",
+    saveAssetLink: "保存资产关联",
+    assetLinked: "已保存事件资产关联。",
+    assetLinkFailed: "无法更新资产关联。",
+    assetsUnavailable: "无法加载蓝队资产。",
+    archivedAsset: "已归档",
+    manageAssets: "管理资产",
+    searchAssets: "搜索要关联的蓝队资产",
+  },
+  es: {
+    eventsSaved: "Eventos guardados",
+    alertsCreated: "Alertas creadas",
+    detectionErrors: "Errores de detección",
+    importComplete: "Importación completada.",
+    importPartial: "Se guardaron los eventos, pero fallaron algunas reglas de detección.",
+    ruleWarnings: "Avisos de detección",
+    assignCase: "Vincular al caso",
+    changeCase: "Cambiar de caso",
+    chooseCase: "Elegir un caso",
+    anyCaseID: "Introduzca cualquier ID de caso, incluidos los antiguos.",
+    saveCaseLink: "Guardar vínculo",
+    caseLinked: "El evento y sus alertas relacionadas se vincularon al caso.",
+    caseMoveFailed: "No se pudo actualizar el caso del evento.",
+    caseMoveConflict:
+      "Este evento o una alerta relacionada ya se cita como evidencia. Revise sus referencias antes de cambiar el caso.",
+    createCase: "Crear un caso",
+    noCases: "Todavía no hay casos disponibles.",
+    linkedAsset: "Activo azul vinculado",
+    observedAsset: "Texto original del activo",
+    noLinkedAsset: "Sin activo vinculado",
+    saveAssetLink: "Guardar vínculo de activo",
+    assetLinked: "Se guardó el vínculo del activo del evento.",
+    assetLinkFailed: "No se pudo actualizar el vínculo del activo.",
+    assetsUnavailable: "No se pudieron cargar los activos azules.",
+    archivedAsset: "archivado",
+    manageAssets: "Gestionar activos",
+    searchAssets: "Buscar activos azules para vincular",
+  },
+} as const;
+
+function linkedEventID(): number | null {
+  if (typeof window === "undefined") return null;
+  const raw = new URLSearchParams(window.location.search).get("event");
+  if (!raw || !/^\d+$/.test(raw)) return null;
+  const id = Number(raw);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+export default function BlueEventsPage() {
+  const copy = useBlueCopy();
+  const locale = useActiveLocale();
+  const labels = eventLabels[locale];
+  const [events, setEvents] = React.useState<BlueEvent[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState("");
+  const [pageError, setPageError] = React.useState("");
+  const [loadingMore, setLoadingMore] = React.useState(false);
+  const [hasMore, setHasMore] = React.useState(false);
+  const [nextOffset, setNextOffset] = React.useState(0);
+  const [file, setFile] = React.useState<File | null>(null);
+  const [defaultSource, setDefaultSource] = React.useState("upload");
+  const [importError, setImportError] = React.useState("");
+  const [importing, setImporting] = React.useState(false);
+  const [importResult, setImportResult] = React.useState<BlueImportResult | null>(null);
+  const [sourceFilter, setSourceFilter] = React.useState("");
+  const [severityFilter, setSeverityFilter] = React.useState<BlueSeverity | "">("");
+  const [textFilter, setTextFilter] = React.useState("");
+  const [sourceQuery, setSourceQuery] = React.useState("");
+  const [textQuery, setTextQuery] = React.useState("");
+  const [selectedEventID, setSelectedEventID] = React.useState<number | null>(null);
+  const [cases, setCases] = React.useState<BlueCase[]>([]);
+  const [casesLoaded, setCasesLoaded] = React.useState(false);
+  const [casesLoading, setCasesLoading] = React.useState(false);
+  const [casesError, setCasesError] = React.useState("");
+  const [moveEventID, setMoveEventID] = React.useState<number | null>(null);
+  const [targetCaseID, setTargetCaseID] = React.useState("");
+  const [targetCase, setTargetCase] = React.useState<BlueCase | null>(null);
+  const [caseChecking, setCaseChecking] = React.useState(false);
+  const [caseLookupError, setCaseLookupError] = React.useState("");
+  const [movingEventID, setMovingEventID] = React.useState<number | null>(null);
+  const [moveError, setMoveError] = React.useState("");
+  const [assets, setAssets] = React.useState<BlueAsset[]>([]);
+  const [assetByID, setAssetByID] = React.useState<Record<number, BlueAsset>>({});
+  const [assetsLoading, setAssetsLoading] = React.useState(true);
+  const [assetsError, setAssetsError] = React.useState("");
+  const [assetSearch, setAssetSearch] = React.useState("");
+  const [assetQuery, setAssetQuery] = React.useState("");
+  const [assetDrafts, setAssetDrafts] = React.useState<Record<number, string>>({});
+  const [assigningAssetID, setAssigningAssetID] = React.useState<number | null>(null);
+  const [assetLinkError, setAssetLinkError] = React.useState<{ eventID: number; message: string } | null>(null);
+  const fileInput = React.useRef<HTMLInputElement>(null);
+  const loadVersion = React.useRef(0);
+  const requestedAssetIDs = React.useRef(new Set<number>());
+
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => setAssetQuery(assetSearch.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [assetSearch]);
+
+  const loadAssets = React.useCallback(async () => {
+    setAssetsLoading(true);
+    setAssetsError("");
+    try {
+      const result = await blueAssetsApi.list({ q: assetQuery, status: "active", limit: 100 });
+      setAssets(result);
+      setAssetByID((current) =>
+        Object.assign({}, current, Object.fromEntries(result.map((asset) => [asset.id, asset]))),
+      );
+    } catch (cause) {
+      setAssetsError(`${labels.assetsUnavailable} ${cause instanceof Error ? cause.message : ""}`);
+    } finally {
+      setAssetsLoading(false);
+    }
+  }, [assetQuery, labels.assetsUnavailable]);
+
+  React.useEffect(() => {
+    void loadAssets();
+  }, [loadAssets]);
+
+  React.useEffect(() => {
+    const missing = Array.from(new Set(events.map((event) => (event as BlueAssetEvent).asset_id)))
+      .filter((id): id is number => typeof id === "number" && id > 0)
+      .filter((id) => !assetByID[id] && !requestedAssetIDs.current.has(id))
+      .slice(0, 8);
+    if (missing.length === 0) return;
+    for (const id of missing) requestedAssetIDs.current.add(id);
+    void Promise.allSettled(missing.map((id) => blueAssetsApi.get(id))).then((results) => {
+      const fetched: Record<number, BlueAsset> = {};
+      for (const result of results) if (result.status === "fulfilled") fetched[result.value.id] = result.value;
+      setAssetByID((current) => ({ ...current, ...fetched }));
+    });
+  }, [assetByID, events]);
+
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSourceQuery(sourceFilter.trim());
+      setTextQuery(textFilter.trim());
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [sourceFilter, textFilter]);
+
+  const load = React.useCallback(async () => {
+    const version = ++loadVersion.current;
+    setLoading(true);
+    setLoadingMore(false);
+    setEvents([]);
+    setAssetDrafts({});
+    setHasMore(false);
+    setNextOffset(0);
+    setError("");
+    setPageError("");
+    try {
+      const page = await blueApi.events({
+        q: textQuery,
+        source: sourceQuery,
+        severity: severityFilter || undefined,
+        limit: PAGE_SIZE + 1,
+        offset: 0,
+      });
+      if (version !== loadVersion.current) return;
+      setHasMore(page.length > PAGE_SIZE);
+      setNextOffset(Math.min(page.length, PAGE_SIZE));
+      const recent = page.slice(0, PAGE_SIZE);
+      const linkedID = linkedEventID();
+      setSelectedEventID(linkedID);
+      if (linkedID && !textQuery && !sourceQuery && !severityFilter && !recent.some((event) => event.id === linkedID)) {
+        try {
+          recent.unshift(await blueApi.getEvent(linkedID));
+        } catch (cause) {
+          if (version === loadVersion.current) setError(cause instanceof Error ? cause.message : copy.loadFailed);
+        }
+      }
+      if (version === loadVersion.current) setEvents(recent);
+    } catch (cause) {
+      if (version === loadVersion.current) setError(cause instanceof Error ? cause.message : copy.loadFailed);
+    } finally {
+      if (version === loadVersion.current) setLoading(false);
+    }
+  }, [copy.loadFailed, severityFilter, sourceQuery, textQuery]);
+
+  const loadMore = React.useCallback(async () => {
+    if (loading || loadingMore || !hasMore) return;
+    const version = loadVersion.current;
+    setLoadingMore(true);
+    setPageError("");
+    try {
+      const next = await blueApi.events({
+        q: textQuery,
+        source: sourceQuery,
+        severity: severityFilter || undefined,
+        limit: PAGE_SIZE + 1,
+        offset: nextOffset,
+      });
+      if (version !== loadVersion.current) return;
+      setEvents((current) => {
+        const seen = new Set(current.map((event) => event.id));
+        return [...current, ...next.slice(0, PAGE_SIZE).filter((event) => !seen.has(event.id))];
+      });
+      setNextOffset(nextOffset + Math.min(next.length, PAGE_SIZE));
+      setHasMore(next.length > PAGE_SIZE);
+    } catch (cause) {
+      if (version === loadVersion.current) setPageError(cause instanceof Error ? cause.message : copy.loadFailed);
+    } finally {
+      if (version === loadVersion.current) setLoadingMore(false);
+    }
+  }, [copy.loadFailed, hasMore, loading, loadingMore, nextOffset, severityFilter, sourceQuery, textQuery]);
+
+  React.useEffect(() => {
+    void load();
+  }, [load]);
+
+  React.useEffect(() => {
+    if (!loading && selectedEventID && events.some((event) => event.id === selectedEventID)) {
+      document.getElementById(`blue-event-${selectedEventID}`)?.scrollIntoView({ block: "center" });
+    }
+  }, [events, loading, selectedEventID]);
+
+  const readFile = React.useCallback(
+    (selected: File | null) => {
+      setFile(selected);
+      setImportError("");
+      setImportResult(null);
+      if (!selected) return;
+      if (selected.size > MAX_FILE_BYTES) {
+        setImportError(copy.fileTooLarge);
+        return;
+      }
+      if (selected.size === 0 || !SUPPORTED_EXTENSION.test(selected.name)) {
+        setImportError(copy.invalidFile);
+      }
+    },
+    [copy.fileTooLarge, copy.invalidFile],
+  );
+
+  const importFile = React.useCallback(async () => {
+    if (!file || importError || importing) return;
+    setImporting(true);
+    setImportError("");
+    setImportResult(null);
+    try {
+      const result = await blueApi.uploadEvents(file, defaultSource);
+      setImportResult(result);
+      if (result.detection_errors > 0 || result.warnings.length > 0) {
+        toast.warning(labels.importPartial);
+      } else {
+        toast.success(`${copy.importComplete}: ${result.imported}`);
+      }
+      setFile(null);
+      if (fileInput.current) fileInput.current.value = "";
+      await load();
+    } catch (cause) {
+      setImportError(`${copy.importFailed} ${cause instanceof Error ? cause.message : copy.loadFailed}`);
+    } finally {
+      setImporting(false);
+    }
+  }, [
+    copy.importComplete,
+    copy.importFailed,
+    copy.loadFailed,
+    defaultSource,
+    file,
+    importError,
+    importing,
+    labels.importPartial,
+    load,
+  ]);
+
+  const loadCases = React.useCallback(async () => {
+    setCasesLoading(true);
+    setCasesError("");
+    try {
+      setCases(await blueApi.cases({ limit: 1000 }));
+      setCasesLoaded(true);
+    } catch (cause) {
+      setCasesError(cause instanceof Error ? cause.message : copy.loadFailed);
+    } finally {
+      setCasesLoading(false);
+    }
+  }, [copy.loadFailed]);
+
+  React.useEffect(() => {
+    setTargetCase(null);
+    setCaseLookupError("");
+    if (moveEventID === null || !targetCaseID.trim()) {
+      setCaseChecking(false);
+      return;
+    }
+    if (
+      !/^\d+$/.test(targetCaseID.trim()) ||
+      !Number.isSafeInteger(Number(targetCaseID)) ||
+      Number(targetCaseID) <= 0
+    ) {
+      setCaseChecking(false);
+      setCaseLookupError(copy.caseNotFound);
+      return;
+    }
+    let active = true;
+    setCaseChecking(true);
+    const timer = window.setTimeout(() => {
+      blueApi
+        .getCase(Number(targetCaseID))
+        .then((item) => {
+          if (active) setTargetCase(item);
+        })
+        .catch((cause: unknown) => {
+          if (active)
+            setCaseLookupError(cause instanceof ApiError && cause.status === 404 ? copy.caseNotFound : copy.loadFailed);
+        })
+        .finally(() => {
+          if (active) setCaseChecking(false);
+        });
+    }, 200);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [copy.caseNotFound, copy.loadFailed, moveEventID, targetCaseID]);
+
+  const openCaseMove = React.useCallback(
+    (event: BlueEvent) => {
+      if (moveEventID === event.id) {
+        setMoveEventID(null);
+        return;
+      }
+      setMoveEventID(event.id);
+      setTargetCaseID(event.case_id ? String(event.case_id) : "");
+      setTargetCase(null);
+      setCaseLookupError("");
+      setMoveError("");
+      if (!casesLoaded && !casesLoading) void loadCases();
+    },
+    [casesLoaded, casesLoading, loadCases, moveEventID],
+  );
+
+  const moveToCase = React.useCallback(
+    async (event: BlueEvent) => {
+      const caseID = Number(targetCaseID);
+      if (
+        !targetCase ||
+        targetCase.id !== caseID ||
+        !Number.isSafeInteger(caseID) ||
+        caseID <= 0 ||
+        caseID === event.case_id ||
+        movingEventID !== null
+      )
+        return;
+      setMovingEventID(event.id);
+      setMoveError("");
+      try {
+        const updated = await blueApi.moveEventCase(event.id, caseID);
+        setEvents((current) => current.map((item) => (item.id === event.id ? updated : item)));
+        setMoveEventID(null);
+        toast.success(labels.caseLinked);
+      } catch (cause) {
+        setMoveError(
+          cause instanceof ApiError && cause.status === 409
+            ? labels.caseMoveConflict
+            : `${labels.caseMoveFailed} ${cause instanceof Error ? cause.message : ""}`,
+        );
+      } finally {
+        setMovingEventID(null);
+      }
+    },
+    [labels.caseLinked, labels.caseMoveConflict, labels.caseMoveFailed, movingEventID, targetCase, targetCaseID],
+  );
+
+  const assignAsset = React.useCallback(
+    async (event: BlueEvent) => {
+      if (assigningAssetID !== null) return;
+      const currentID = (event as BlueAssetEvent).asset_id ?? null;
+      const draft = assetDrafts[event.id] ?? (currentID === null ? "" : String(currentID));
+      const nextID = draft === "" ? null : Number(draft);
+      if (nextID === currentID || (nextID !== null && (!Number.isSafeInteger(nextID) || nextID <= 0))) return;
+      setAssigningAssetID(event.id);
+      setAssetLinkError(null);
+      try {
+        const updated = await blueAssetsApi.assignEventAsset(event.id, nextID);
+        setEvents((current) => current.map((entry) => (entry.id === event.id ? updated : entry)));
+        setAssetDrafts((current) => {
+          const next = { ...current };
+          delete next[event.id];
+          return next;
+        });
+        toast.success(labels.assetLinked);
+      } catch (cause) {
+        setAssetLinkError({
+          eventID: event.id,
+          message: `${labels.assetLinkFailed} ${cause instanceof Error ? cause.message : ""}`,
+        });
+      } finally {
+        setAssigningAssetID(null);
+      }
+    },
+    [assetDrafts, assigningAssetID, labels.assetLinkFailed, labels.assetLinked],
+  );
+
+  return (
+    <div className="space-y-5">
+      <BluePageHeader
+        title={copy.events}
+        description={copy.eventsDescription}
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
+              <RefreshCw className={loading ? "animate-spin" : ""} />
+              {copy.refresh}
+            </Button>
+            <BlueInvestigationTabs active="events" />
+          </>
+        }
+      />
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Upload className="size-4" />
+            {copy.importEvents}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">{copy.importDescription}</p>
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_16rem]">
+            <div className="space-y-1.5">
+              <label htmlFor="blue-event-file" className="text-xs font-medium">
+                {copy.chooseFile}
+              </label>
+              <Input
+                ref={fileInput}
+                id="blue-event-file"
+                type="file"
+                accept=".json,.jsonl,.ndjson,.csv,application/json,text/csv,application/x-ndjson"
+                onChange={(event) => readFile(event.target.files?.[0] ?? null)}
+                disabled={importing}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="blue-event-source" className="text-xs font-medium">
+                {copy.sourceOverride}
+              </label>
+              <Input
+                id="blue-event-source"
+                value={defaultSource}
+                onChange={(event) => setDefaultSource(event.target.value)}
+                disabled={importing}
+              />
+            </div>
+          </div>
+          {importError && <BlueError message={importError} />}
+          {file && !importError && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+              <span className="flex items-center gap-2">
+                <FileText className="size-4 text-primary" />
+                {file.name} · {(file.size / 1024).toLocaleString(undefined, { maximumFractionDigits: 1 })} KB
+              </span>
+              <Button size="sm" onClick={() => void importFile()} disabled={importing}>
+                {importing ? copy.importing : copy.import}
+              </Button>
+            </div>
+          )}
+          {importResult && (
+            <div
+              role={importResult.detection_errors > 0 || importResult.warnings.length > 0 ? "alert" : "status"}
+              className={
+                importResult.detection_errors > 0 || importResult.warnings.length > 0
+                  ? "space-y-3 rounded-lg border border-amber-500/50 bg-amber-500/10 p-4"
+                  : "space-y-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-4"
+              }
+            >
+              <p className="font-medium">
+                {importResult.detection_errors > 0 || importResult.warnings.length > 0
+                  ? labels.importPartial
+                  : labels.importComplete}
+              </p>
+              <dl className="grid gap-3 text-sm sm:grid-cols-3">
+                <div>
+                  <dt className="text-muted-foreground">{labels.eventsSaved}</dt>
+                  <dd className="font-semibold">{importResult.imported.toLocaleString(locale)}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">{labels.alertsCreated}</dt>
+                  <dd className="font-semibold">{importResult.alerts_matched.toLocaleString(locale)}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">{labels.detectionErrors}</dt>
+                  <dd className="font-semibold">{importResult.detection_errors.toLocaleString(locale)}</dd>
+                </div>
+              </dl>
+              {importResult.warnings.length > 0 && (
+                <div className="space-y-1 text-sm">
+                  <p className="font-medium">{labels.ruleWarnings}</p>
+                  <ul className="max-h-48 list-disc space-y-1 overflow-auto pl-5">
+                    {Array.from(new Set(importResult.warnings)).map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <BlueSourcesPanel onEventsChanged={() => void load()} />
+
+      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+        <Link href="/blue/assets" className="text-primary underline-offset-4 hover:underline">
+          {labels.manageAssets}
+        </Link>
+        {assetsLoading && <span>{copy.loading}</span>}
+        {assetsError && (
+          <span role="alert" className="text-destructive">
+            {assetsError}{" "}
+            <button type="button" className="underline" onClick={() => void loadAssets()}>
+              {copy.refresh}
+            </button>
+          </span>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          value={assetSearch}
+          onChange={(event) => setAssetSearch(event.target.value)}
+          aria-label={labels.searchAssets}
+          placeholder={labels.searchAssets}
+          className="max-w-56"
+        />
+        <Input
+          value={textFilter}
+          onChange={(event) => setTextFilter(event.target.value)}
+          placeholder={copy.message}
+          aria-label={copy.message}
+          className="max-w-sm"
+        />
+        <Input
+          value={sourceFilter}
+          onChange={(event) => setSourceFilter(event.target.value)}
+          aria-label={copy.filterSource}
+          placeholder={copy.filterSource}
+          className="max-w-48"
+        />
+        <select
+          value={severityFilter}
+          onChange={(event) => setSeverityFilter(event.target.value as BlueSeverity | "")}
+          aria-label={copy.severity}
+          className="h-8 rounded-lg border border-input bg-background px-2.5 text-sm"
+        >
+          <option value="">{copy.allSeverities}</option>
+          {(["critical", "high", "medium", "low", "info"] as const).map((severity) => (
+            <option key={severity} value={severity}>
+              {blueSeverityLabel(severity, locale)}
+            </option>
+          ))}
+        </select>
+        <span className="text-xs text-muted-foreground">
+          {events.length.toLocaleString(locale)}
+          {hasMore ? "+" : ""}
+        </span>
+      </div>
+      {error && <BlueError message={error} retry={() => void load()} retryLabel={copy.refresh} />}
+      {loading && events.length === 0 && <BlueLoading label={copy.loading} />}
+      {!loading && !error && events.length === 0 && (
+        <BlueEmpty message={textQuery || sourceQuery || severityFilter ? copy.noData : copy.noEvents} />
+      )}
+      {events.length > 0 && (
+        <Card>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ID</TableHead>
+                  <TableHead>{copy.occurredAt}</TableHead>
+                  <TableHead>{copy.source}</TableHead>
+                  <TableHead>{copy.eventType}</TableHead>
+                  <TableHead>{copy.severity}</TableHead>
+                  <TableHead>{copy.asset}</TableHead>
+                  <TableHead>{copy.message}</TableHead>
+                  <TableHead>{copy.case}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {events.map((event) => (
+                  <TableRow
+                    key={event.id}
+                    id={`blue-event-${event.id}`}
+                    aria-selected={event.id === selectedEventID}
+                    data-state={event.id === selectedEventID ? "selected" : undefined}
+                  >
+                    <TableCell className="font-mono text-xs">#{event.id}</TableCell>
+                    <TableCell className="text-xs">{blueDate(event.occurred_at, locale)}</TableCell>
+                    <TableCell>{event.source}</TableCell>
+                    <TableCell className="font-mono text-xs">{event.event_type}</TableCell>
+                    <TableCell>
+                      <BlueSeverityBadge severity={event.severity} locale={locale} />
+                    </TableCell>
+                    <TableCell className="min-w-52 align-top">
+                      <div className="space-y-2">
+                        <div className="max-w-52 break-words text-xs">
+                          <span className="text-muted-foreground">{labels.observedAsset}: </span>
+                          {event.asset || copy.unavailable}
+                        </div>
+                        <label htmlFor={`blue-event-asset-${event.id}`} className="block text-muted-foreground text-xs">
+                          {labels.linkedAsset}
+                        </label>
+                        {(event as BlueAssetEvent).asset_id && (
+                          <p className="break-words text-xs">
+                            {assetByID[(event as BlueAssetEvent).asset_id as number]?.label ||
+                              assetByID[(event as BlueAssetEvent).asset_id as number]?.identifier ||
+                              `#${(event as BlueAssetEvent).asset_id}`}
+                          </p>
+                        )}
+                        <select
+                          id={`blue-event-asset-${event.id}`}
+                          aria-label={`${labels.linkedAsset} #${event.id}`}
+                          value={
+                            assetDrafts[event.id] ??
+                            ((event as BlueAssetEvent).asset_id ? String((event as BlueAssetEvent).asset_id) : "")
+                          }
+                          onChange={(selection) =>
+                            setAssetDrafts((current) => ({ ...current, [event.id]: selection.target.value }))
+                          }
+                          disabled={assetsLoading || Boolean(assetsError) || assigningAssetID !== null}
+                          className="h-8 w-full rounded-lg border border-input bg-background px-2 text-xs"
+                        >
+                          <option value="">{labels.noLinkedAsset}</option>
+                          {assetDrafts[event.id] &&
+                            Number(assetDrafts[event.id]) !== (event as BlueAssetEvent).asset_id &&
+                            !assets.some((asset) => asset.id === Number(assetDrafts[event.id])) && (
+                              <option value={assetDrafts[event.id]}>
+                                {assetByID[Number(assetDrafts[event.id])]?.label ||
+                                  assetByID[Number(assetDrafts[event.id])]?.identifier ||
+                                  `#${assetDrafts[event.id]}`}
+                              </option>
+                            )}
+                          {(event as BlueAssetEvent).asset_id &&
+                            !assets.some((asset) => asset.id === (event as BlueAssetEvent).asset_id) && (
+                              <option value={(event as BlueAssetEvent).asset_id ?? ""}>
+                                {assetByID[(event as BlueAssetEvent).asset_id as number]?.label ||
+                                  assetByID[(event as BlueAssetEvent).asset_id as number]?.identifier ||
+                                  `#${(event as BlueAssetEvent).asset_id}`}
+                                {assetByID[(event as BlueAssetEvent).asset_id as number]?.status === "archived"
+                                  ? ` · ${labels.archivedAsset}`
+                                  : ""}
+                              </option>
+                            )}
+                          {assets.map((asset) => (
+                            <option key={asset.id} value={asset.id}>
+                              {asset.label || asset.identifier} ({asset.kind}: {asset.identifier})
+                            </option>
+                          ))}
+                        </select>
+                        {assetDrafts[event.id] !== undefined &&
+                          assetDrafts[event.id] !==
+                            ((event as BlueAssetEvent).asset_id ? String((event as BlueAssetEvent).asset_id) : "") && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void assignAsset(event)}
+                              disabled={assigningAssetID !== null}
+                            >
+                              {assigningAssetID === event.id ? copy.loading : labels.saveAssetLink}
+                            </Button>
+                          )}
+                        {assetLinkError?.eventID === event.id && (
+                          <p role="alert" className="text-destructive text-xs">
+                            {assetLinkError.message}
+                          </p>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="min-w-72 max-w-xl whitespace-normal">
+                      <div className="space-y-1">
+                        <p className="break-words">{event.message}</p>
+                        <details className="text-xs text-muted-foreground">
+                          <summary className="cursor-pointer select-none">{copy.showOriginal}</summary>
+                          <pre className="mt-2 max-h-72 overflow-auto rounded-md border bg-muted/40 p-2 text-[11px] whitespace-pre-wrap break-all">
+                            {JSON.stringify(event.raw, null, 2)}
+                          </pre>
+                        </details>
+                      </div>
+                    </TableCell>
+                    <TableCell className="min-w-48 align-top">
+                      <div className="space-y-2">
+                        <div>
+                          {event.case_id ? (
+                            <Link
+                              className="text-primary underline-offset-4 hover:underline"
+                              href={`/blue/cases/detail?id=${event.case_id}`}
+                            >
+                              #{event.case_id}
+                            </Link>
+                          ) : (
+                            copy.noCase
+                          )}
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openCaseMove(event)}
+                          disabled={movingEventID !== null}
+                        >
+                          {event.case_id ? labels.changeCase : labels.assignCase}
+                        </Button>
+                        {moveEventID === event.id && (
+                          <div className="space-y-2 rounded-md border bg-background p-2">
+                            {casesLoading && <p className="text-muted-foreground text-xs">{copy.loading}</p>}
+                            {casesError && (
+                              <div role="alert" className="space-y-1 text-xs">
+                                <p className="text-destructive">{casesError}</p>
+                                <Button variant="outline" size="sm" onClick={() => void loadCases()}>
+                                  {copy.refresh}
+                                </Button>
+                              </div>
+                            )}
+                            {casesLoaded && cases.length === 0 && (
+                              <p className="text-muted-foreground text-xs">{labels.noCases}</p>
+                            )}
+                            <label htmlFor={`blue-event-case-${event.id}`} className="sr-only">
+                              {labels.chooseCase}
+                            </label>
+                            <Input
+                              id={`blue-event-case-${event.id}`}
+                              value={targetCaseID}
+                              onChange={(selection) => setTargetCaseID(selection.target.value)}
+                              disabled={movingEventID === event.id}
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              list={`blue-event-case-options-${event.id}`}
+                              placeholder={copy.caseID}
+                              className="h-8 text-xs"
+                            />
+                            <datalist id={`blue-event-case-options-${event.id}`}>
+                              {cases.map((caseItem) => (
+                                <option key={caseItem.id} value={caseItem.id} label={caseItem.title} />
+                              ))}
+                            </datalist>
+                            <p className="text-muted-foreground text-xs">{labels.anyCaseID}</p>
+                            {caseChecking && <p className="text-muted-foreground text-xs">{copy.loading}</p>}
+                            {caseLookupError && <p className="text-destructive text-xs">{caseLookupError}</p>}
+                            {targetCase && targetCase.id === Number(targetCaseID) && (
+                              <Link
+                                className="block text-primary text-xs underline-offset-4 hover:underline"
+                                href={`/blue/cases/detail?id=${targetCase.id}`}
+                              >
+                                #{targetCase.id} {targetCase.title}
+                              </Link>
+                            )}
+                            <Button
+                              size="sm"
+                              onClick={() => void moveToCase(event)}
+                              disabled={
+                                targetCase?.id !== Number(targetCaseID) ||
+                                Number(targetCaseID) === event.case_id ||
+                                movingEventID !== null
+                              }
+                            >
+                              {movingEventID === event.id ? copy.loading : labels.saveCaseLink}
+                            </Button>
+                            <Link
+                              className="block text-primary text-xs underline-offset-4 hover:underline"
+                              href="/blue/cases"
+                            >
+                              {labels.createCase}
+                            </Link>
+                            {moveError && (
+                              <p role="alert" className="text-destructive text-xs">
+                                {moveError}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+      {pageError && <BlueError message={pageError} retry={() => void loadMore()} retryLabel={copy.loadMore} />}
+      {hasMore && !loading && (
+        <div className="flex justify-center">
+          <Button variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>
+            {loadingMore ? copy.loadingMore : copy.loadMore}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}

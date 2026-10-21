@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { auth } from "@/lib/auth";
+import { readStoredTeamMode, teamLandingRoute } from "@/lib/team-mode";
 
 export default function SetupPage() {
   const router = useRouter();
@@ -51,7 +52,7 @@ export default function SetupPage() {
     try {
       const { token } = await api.initPassword(password, setupToken.trim());
       auth.setToken(token);
-      router.replace("/function/tasks");
+      router.replace(teamLandingRoute[readStoredTeamMode()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("setup.errorInit"));
     } finally {

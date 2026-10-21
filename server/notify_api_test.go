@@ -673,7 +673,7 @@ func TestNotifyMetaAndSettingsRoundTrip(t *testing.T) {
 	}
 
 	// Round-trip three global settings. Strip the trailing slash from the base
-	// URL so deep links do not contain "//function/...".
+	// URL so deep links do not contain "//redteam/...".
 	if r := f.request("PUT", "/api/settings", `{"notify_public_base_url":"https://artex.example.com/","notify_digest_interval_min":15,"notify_enabled":true}`); r.Code != 200 {
 		t.Fatalf("failed to update settings (%d): %s", r.Code, r.Body)
 	}
@@ -718,7 +718,7 @@ func TestNotifyDeepLinkUsesPublicBaseURL(t *testing.T) {
 	if card == nil {
 		t.Fatalf("expected ActionCard with a deep link, got msgtype=%v", body["msgtype"])
 	}
-	want := fmt.Sprintf("https://artex.example.com/function/findings/detail?id=%d", finding)
+	want := fmt.Sprintf("https://artex.example.com/redteam/findings/detail?id=%d", finding)
 	if card["singleURL"] != want {
 		t.Fatalf("wrong deep link\nwant %s\ngot %v", want, card["singleURL"])
 	}

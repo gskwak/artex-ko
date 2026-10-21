@@ -242,7 +242,7 @@ func (s *Server) sideParent(w http.ResponseWriter, r *http.Request, kind string)
 			writeErr(w, 500, err.Error())
 			return p, false
 		}
-		if c == nil {
+		if c == nil || c.AgentKey == blueChatAgentKey {
 			writeErr(w, 404, "conversation not found")
 			return p, false
 		}
