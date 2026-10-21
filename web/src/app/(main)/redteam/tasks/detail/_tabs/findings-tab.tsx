@@ -116,8 +116,8 @@ function Row({
           <Link
             href={
               f.inherited
-                ? `/function/findings/detail?id=${f.finding_id}&context_task=${contextTaskId}`
-                : `/function/findings/detail?id=${f.finding_id}`
+                ? `/redteam/findings/detail?id=${f.finding_id}&context_task=${contextTaskId}`
+                : `/redteam/findings/detail?id=${f.finding_id}`
             }
             className="text-muted-foreground hover:text-primary inline-flex shrink-0 items-center gap-0.5 text-xs"
             title={t("viewDetail")}

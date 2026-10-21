@@ -28,7 +28,13 @@ const (
 // registerBlueRoutes keeps defensive investigations separate from the red-team
 // exploration API. The Server's normal JWT middleware protects all these paths.
 func (s *Server) registerBlueRoutes(mux *http.ServeMux) {
+	s.registerBlueChatRoutes(mux)
 	mux.HandleFunc("GET /api/blue/overview", s.blueOverview)
+	mux.HandleFunc("GET /api/blue/tasks", s.blueListTasks)
+	mux.HandleFunc("POST /api/blue/tasks", s.blueCreateTask)
+	mux.HandleFunc("GET /api/blue/tasks/{id}", s.blueGetTask)
+	mux.HandleFunc("PATCH /api/blue/tasks/{id}", s.bluePatchTask)
+	mux.HandleFunc("POST /api/blue/tasks/{id}/run", s.blueRunTask)
 	mux.HandleFunc("GET /api/blue/cases", s.blueListCases)
 	mux.HandleFunc("POST /api/blue/cases", s.blueCreateCase)
 	mux.HandleFunc("POST /api/blue/cases/from-finding", s.blueCaseFromFinding)

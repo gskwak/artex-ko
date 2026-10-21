@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useTeamMode } from "@/hooks/use-team-mode";
-import { persistPreference } from "@/lib/preferences/preferences-storage";
+import { persistTeamThemeMode } from "@/lib/preferences/team-theme";
 import { THEME_VARIANTS } from "@/lib/preferences/theme";
 import { applyThemeMode } from "@/lib/preferences/theme-utils";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
@@ -27,9 +27,9 @@ export function ThemeSwitcher() {
   const selectTheme = (value: string) => {
     const selected = THEME_VARIANTS.find((theme) => theme.value === value && theme.preset === mode);
     if (!selected) return;
+    persistTeamThemeMode(mode, selected.mode);
     applyThemeMode(selected.mode);
     setThemeMode(selected.mode);
-    void persistPreference("theme_mode", selected.mode);
   };
 
   return (

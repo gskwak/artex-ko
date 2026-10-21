@@ -108,7 +108,7 @@ export function NavMain({ items }: NavMainProps) {
       return item.subItems.some((sub) => path.startsWith(sub.url));
     }
 
-    return path === item.url || (item.url.startsWith("/blue/") && path.startsWith(`${item.url}/`));
+    return path === item.url || path.startsWith(`${item.url}/`);
   };
 
   const isSubItemActive = (url: string) => {
@@ -132,7 +132,7 @@ export function NavMain({ items }: NavMainProps) {
             <SidebarMenu>
               {group.items.map((item) => (
                 <NavItem
-                  key={item.id}
+                  key={`${item.id}-${hasSubItems(item) && isSubmenuOpen(item)}`}
                   item={item}
                   isItemActive={isItemActive}
                   isSubItemActive={isSubItemActive}

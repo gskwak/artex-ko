@@ -1542,3 +1542,29 @@ CREATE TABLE IF NOT EXISTS blue_analysis_runs (
 CREATE INDEX IF NOT EXISTS idx_blue_analysis_runs_case ON blue_analysis_runs(case_id, created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_blue_analysis_runs_active_case
     ON blue_analysis_runs(case_id) WHERE status IN ('queued','running');
+
+-- Blue-team work items track defensive investigation separately from red-team
+-- exploration tasks. A linked case may be analyzed through the bounded,
+-- evidence-based blue analyst; the latest run is retained for audit.
+CREATE TABLE IF NOT EXISTS blue_tasks (
+    id              BIGSERIAL PRIMARY KEY,
+    title           TEXT NOT NULL,
+    description     TEXT NOT NULL DEFAULT '',
+    case_id         BIGINT REFERENCES blue_cases(id) ON DELETE SET NULL,
+    priority        TEXT NOT NULL DEFAULT 'medium'
+                    CHECK (priority IN ('low','medium','high','critical')),
+    status          TEXT NOT NULL DEFAULT 'open'
+                    CHECK (status IN ('open','in_progress','completed','blocked')),
+    result          TEXT NOT NULL DEFAULT '',
+    analysis_run_id BIGINT REFERENCES blue_analysis_runs(id) ON DELETE SET NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_blue_tasks_status ON blue_tasks(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_blue_tasks_case ON blue_tasks(case_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_blue_tasks_analysis_run ON blue_tasks(analysis_run_id)
+    WHERE analysis_run_id IS NOT NULL;
+DROP TRIGGER IF EXISTS trg_blue_tasks_upd ON blue_tasks;
+CREATE TRIGGER trg_blue_tasks_upd BEFORE UPDATE ON blue_tasks
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();

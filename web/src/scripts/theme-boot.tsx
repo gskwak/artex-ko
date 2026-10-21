@@ -7,10 +7,11 @@
  * preventing layout or theme flicker and keeping RootLayout fully static.
  */
 import { PREFERENCE_DEFAULTS, PREFERENCE_PERSISTENCE } from "@/lib/preferences/preferences-config";
+import { TEAM_THEME_MODE_COOKIE_PREFIX } from "@/lib/preferences/theme";
+import { TEAM_MODE_STORAGE_KEY } from "@/lib/team-mode";
 
 export function ThemeBootScript() {
   const persistence = JSON.stringify({
-    theme_mode: PREFERENCE_PERSISTENCE.theme_mode,
     font: PREFERENCE_PERSISTENCE.font,
     content_layout: PREFERENCE_PERSISTENCE.content_layout,
     navbar_style: PREFERENCE_PERSISTENCE.navbar_style,
@@ -26,6 +27,9 @@ export function ThemeBootScript() {
     sidebar_variant: PREFERENCE_DEFAULTS.sidebar_variant,
     sidebar_collapsible: PREFERENCE_DEFAULTS.sidebar_collapsible,
   });
+
+  const teamThemeCookiePrefix = JSON.stringify(TEAM_THEME_MODE_COOKIE_PREFIX);
+  const teamModeStorageKey = JSON.stringify(TEAM_MODE_STORAGE_KEY);
 
   const code = `
     (function () {
@@ -71,6 +75,7 @@ export function ThemeBootScript() {
         function teamFromPath(pathname) {
           var path = pathname.replace(/\\/+$/, "") || "/";
           if (path === "/blue" || path.startsWith("/blue/")) return "blue";
+          if (path === "/redteam" || path.startsWith("/redteam/")) return "red";
           if (path === "/dashboard" || path.startsWith("/dashboard/") || path === "/chat" || path.startsWith("/chat/")) {
             return "red";
           }
@@ -79,7 +84,6 @@ export function ThemeBootScript() {
           return null;
         }
 
-        var rawMode = readPreference("theme_mode", DEFAULTS.theme_mode);
         var rawFont = readPreference("font", DEFAULTS.font);
         var rawContentLayout = readPreference("content_layout", DEFAULTS.content_layout);
         var rawNavbarStyle = readPreference("navbar_style", DEFAULTS.navbar_style);
@@ -87,9 +91,10 @@ export function ThemeBootScript() {
         var rawSidebarCollapsible = readPreference("sidebar_collapsible", DEFAULTS.sidebar_collapsible);
 
         // Team identity owns the accent color; a stale theme_preset cookie cannot override it.
-        var storedTeam = readLocal("artex_team_mode");
+        var storedTeam = readLocal(${teamModeStorageKey});
         var preset = teamFromPath(window.location.pathname) || (storedTeam === "blue" ? "blue" : "red");
-        var mode = rawMode === "dark" ? "dark" : DEFAULTS.theme_mode;
+        var savedTeamMode = readCookie(${teamThemeCookiePrefix} + preset);
+        var mode = savedTeamMode === "dark" ? "dark" : DEFAULTS.theme_mode;
         var resolvedMode = mode;
         var font = rawFont || DEFAULTS.font;
         var contentLayout = rawContentLayout || DEFAULTS.content_layout;

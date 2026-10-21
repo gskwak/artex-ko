@@ -16,10 +16,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  // Authenticated users on the login or setup page go to the main view.
-  if (token && isAuthPage) {
-    return NextResponse.redirect(new URL("/function/tasks", request.url));
-  }
+  // Login/setup client pages choose the saved team's landing route.
 
   return NextResponse.next();
 }

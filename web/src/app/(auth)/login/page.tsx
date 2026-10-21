@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { auth } from "@/lib/auth";
+import { readStoredTeamMode, teamLandingRoute } from "@/lib/team-mode";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -50,7 +51,7 @@ export default function LoginPage() {
       // then make a fresh request so the server guard or route cache does not redirect back
       // to the login page while it is still in the checking state.
       auth.setToken(token);
-      window.location.replace("/function/tasks");
+      window.location.replace(teamLandingRoute[readStoredTeamMode()]);
       return;
     }
     api
@@ -73,7 +74,7 @@ export default function LoginPage() {
     try {
       const { token } = await api.login("ARTEX", password);
       auth.setToken(token);
-      window.location.replace("/function/tasks");
+      window.location.replace(teamLandingRoute[readStoredTeamMode()]);
     } catch {
       setError(t("login.errorCredential"));
     } finally {

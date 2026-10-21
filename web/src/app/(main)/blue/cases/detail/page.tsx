@@ -387,7 +387,7 @@ function CaseDetailInner() {
             </span>
             {item.red_finding_id ? (
               <Button asChild size="sm" variant="link">
-                <Link href={`/function/findings/detail?id=${item.red_finding_id}`}>
+                <Link href={`/redteam/findings/detail?id=${item.red_finding_id}`}>
                   {copy.linkedRedFinding} #{item.red_finding_id}
                   <ExternalLink />
                 </Link>

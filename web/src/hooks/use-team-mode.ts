@@ -6,43 +6,25 @@ import { usePathname, useRouter } from "next/navigation";
 
 import { getClientCookie } from "@/lib/cookie.client";
 import { persistPreference } from "@/lib/preferences/preferences-storage";
-import { applyThemePreset } from "@/lib/preferences/theme-utils";
+import { readTeamThemeMode, type TeamMode } from "@/lib/preferences/team-theme";
+import { applyThemeMode, applyThemePreset } from "@/lib/preferences/theme-utils";
+import { persistStoredTeamMode, readStoredTeamMode, TEAM_MODE_STORAGE_KEY, teamLandingRoute } from "@/lib/team-mode";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
-export type TeamMode = "red" | "blue";
+export type { TeamMode } from "@/lib/team-mode";
+export { teamLandingRoute } from "@/lib/team-mode";
 
-const STORAGE_KEY = "artex_team_mode";
 const MODE_CHANGE_EVENT = "artex-team-mode-change";
-
-export const teamLandingRoute: Record<TeamMode, string> = {
-  red: "/function/tasks",
-  blue: "/blue/dashboard",
-};
 
 function modeFromPath(pathname: string): TeamMode | null {
   const path = pathname.replace(/\/+$/, "") || "/";
   if (path === "/blue" || path.startsWith("/blue/")) return "blue";
+  if (path === "/redteam" || path.startsWith("/redteam/")) return "red";
   if (path === "/dashboard" || path === "/chat") return "red";
   // The asset inventory is shared by both teams. System routes are shared too.
   const sharedAssets = path === "/function/assets" || path.startsWith("/function/assets/");
   if (path.startsWith("/function/") && !sharedAssets) return "red";
   return null;
-}
-
-function readStoredMode(): TeamMode {
-  try {
-    return window.localStorage.getItem(STORAGE_KEY) === "blue" ? "blue" : "red";
-  } catch {
-    return "red";
-  }
-}
-
-function persistMode(mode: TeamMode) {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, mode);
-  } catch {
-    // The route still determines the active mode when storage is unavailable.
-  }
 }
 
 /** Keeps the selected mode in sync with direct links and shared routes. */
@@ -51,6 +33,8 @@ export function useTeamMode() {
   const router = useRouter();
   const themePreset = usePreferencesStore((state) => state.themePreset);
   const setThemePreset = usePreferencesStore((state) => state.setThemePreset);
+  const themeMode = usePreferencesStore((state) => state.themeMode);
+  const setThemeMode = usePreferencesStore((state) => state.setThemeMode);
   const [mode, setMode] = React.useState<TeamMode>(() => modeFromPath(pathname) ?? "red");
 
   const syncThemePreset = React.useCallback(
@@ -66,26 +50,42 @@ export function useTeamMode() {
     [setThemePreset, themePreset],
   );
 
+  const syncThemeMode = React.useCallback(
+    (next: TeamMode) => {
+      const selected = readTeamThemeMode(next);
+      if (document.documentElement.getAttribute("data-theme-mode") !== selected) {
+        applyThemeMode(selected);
+      }
+      if (themeMode !== selected) {
+        setThemeMode(selected);
+      }
+    },
+    [setThemeMode, themeMode],
+  );
+
   React.useEffect(() => {
     const routeMode = modeFromPath(pathname);
-    const next = routeMode ?? readStoredMode();
+    const next = routeMode ?? readStoredTeamMode();
     setMode(next);
     syncThemePreset(next);
-    if (routeMode) persistMode(routeMode);
-  }, [pathname, syncThemePreset]);
+    syncThemeMode(next);
+    if (routeMode) persistStoredTeamMode(routeMode);
+  }, [pathname, syncThemeMode, syncThemePreset]);
 
   React.useEffect(() => {
     const onStorage = (event: StorageEvent) => {
-      if (event.key === STORAGE_KEY && !modeFromPath(pathname)) {
-        const next = readStoredMode();
+      if (event.key === TEAM_MODE_STORAGE_KEY && !modeFromPath(pathname)) {
+        const next = readStoredTeamMode();
         setMode(next);
         syncThemePreset(next);
+        syncThemeMode(next);
       }
     };
     const onModeChange = (event: Event) => {
       const next = (event as CustomEvent<TeamMode>).detail;
       setMode(next);
       syncThemePreset(next);
+      syncThemeMode(next);
     };
     window.addEventListener("storage", onStorage);
     window.addEventListener(MODE_CHANGE_EVENT, onModeChange);
@@ -93,17 +93,18 @@ export function useTeamMode() {
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(MODE_CHANGE_EVENT, onModeChange);
     };
-  }, [pathname, syncThemePreset]);
+  }, [pathname, syncThemeMode, syncThemePreset]);
 
   const selectMode = React.useCallback(
     (next: TeamMode) => {
       setMode(next);
-      persistMode(next);
+      persistStoredTeamMode(next);
       syncThemePreset(next);
+      syncThemeMode(next);
       window.dispatchEvent(new CustomEvent<TeamMode>(MODE_CHANGE_EVENT, { detail: next }));
       router.push(teamLandingRoute[next]);
     },
-    [router, syncThemePreset],
+    [router, syncThemeMode, syncThemePreset],
   );
 
   return { mode, selectMode };

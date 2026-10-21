@@ -153,7 +153,7 @@
   },
   "nav": {
     "group": {
-      "blue": "蓝队",
+      "blue": "功能",
       "function": "功能",
       "system": "系统"
     },
@@ -165,7 +165,8 @@
       "blueActions": "响应操作",
       "blueAlerts": "告警",
       "blueCases": "案件",
-      "blueDashboard": "总览",
+      "blueDashboard": "仪表盘",
+      "blueDetection": "检测",
       "blueEvents": "事件",
       "blueRules": "检测规则",
       "chat": "对话",

@@ -33,64 +33,78 @@ func (s *Server) blueAnalyzeCase(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	caseItem, err := pg.GetBlueCase(r.Context(), caseID)
-	if err != nil {
-		blueInternal(w, err)
+	job, status, message := s.prepareBlueCaseAnalysis(r.Context(), pg, caseID)
+	if job == nil {
+		writeErr(w, status, message)
 		return
 	}
+	go s.runBlueAnalysis(pg, job.run, job.provider, job.maxTokens, job.strategy, job.input)
+	writeJSON(w, http.StatusAccepted, map[string]any{"run": &job.run})
+}
+
+// A prepared job has a persisted queued run and owns one analysis slot. The
+// caller can attach a work item before launching its worker, avoiding a race
+// where a very fast model finishes before the work item records the run ID.
+type bluePreparedAnalysis struct {
+	run       db.BlueAnalysisRun
+	provider  llm.Provider
+	maxTokens int
+	strategy  string
+	input     analysis.Input
+}
+
+func (s *Server) prepareBlueCaseAnalysis(ctx context.Context, pg *db.DB, caseID int64) (*bluePreparedAnalysis, int, string) {
+	internal := func(err error) (*bluePreparedAnalysis, int, string) {
+		log.Printf("[blue] prepare analysis: %v", err)
+		return nil, http.StatusInternalServerError, "blue-team request failed"
+	}
+	caseItem, err := pg.GetBlueCase(ctx, caseID)
+	if err != nil {
+		return internal(err)
+	}
 	if caseItem == nil {
-		writeErr(w, http.StatusNotFound, "case not found")
-		return
+		return nil, http.StatusNotFound, "case not found"
 	}
 	actor, err := pg.GetAgentByKey("blue_analyst")
 	if err != nil {
-		blueInternal(w, err)
-		return
+		return internal(err)
 	}
 	if actor == nil || !actor.Enabled {
-		writeErr(w, http.StatusConflict, "blue analyst is disabled")
-		return
+		return nil, http.StatusConflict, "blue analyst is disabled"
 	}
 
 	// The editable prompt and model binding are read at job creation, so editing
 	// either setting while a run is active cannot silently change that run.
 	strategy, err := pg.CurrentPrompt(actor.ID)
 	if err != nil {
-		blueInternal(w, err)
-		return
+		return internal(err)
 	}
 	prov, cfg, profileID, ready := s.blueAnalystProvider(actor)
 	if !ready {
-		writeErr(w, http.StatusServiceUnavailable, "configure a model for the blue analyst")
-		return
+		return nil, http.StatusServiceUnavailable, "configure a model for the blue analyst"
 	}
-	input, err := blueAnalysisInput(r.Context(), pg, caseItem)
+	input, err := blueAnalysisInput(ctx, pg, caseItem)
 	if err != nil {
-		blueInternal(w, err)
-		return
+		return internal(err)
 	}
 	if len(input.Events)+len(input.Alerts) == 0 {
-		writeErr(w, http.StatusConflict, "add case events or alerts before analysis")
-		return
+		return nil, http.StatusConflict, "add case events or alerts before analysis"
 	}
 	select {
 	case blueAnalysisSlots <- struct{}{}:
 	default:
-		writeErr(w, http.StatusTooManyRequests, "blue analysis capacity is busy; retry shortly")
-		return
+		return nil, http.StatusTooManyRequests, "blue analysis capacity is busy; retry shortly"
 	}
-	run, err := pg.CreateBlueAnalysisRun(r.Context(), caseID, profileID)
+	run, err := pg.CreateBlueAnalysisRun(ctx, caseID, profileID)
 	if err != nil {
 		<-blueAnalysisSlots
 		if errors.Is(err, db.ErrBlueConflict) {
-			writeErr(w, http.StatusConflict, "this case already has an active analysis")
-			return
+			return nil, http.StatusConflict, "this case already has an active analysis"
 		}
-		blueInternal(w, err)
-		return
+		return internal(err)
 	}
-	go s.runBlueAnalysis(pg, *run, prov, cfg.MaxTokens, strategy, input)
-	writeJSON(w, http.StatusAccepted, map[string]any{"run": run})
+	return &bluePreparedAnalysis{run: *run, provider: prov, maxTokens: cfg.MaxTokens,
+		strategy: strategy, input: input}, 0, ""
 }
 
 func (s *Server) blueAnalystProvider(actor *db.Agent) (llm.Provider, intConfig, *int64, bool) {
@@ -209,7 +223,13 @@ func (s *Server) runBlueAnalysis(pg *db.DB, run db.BlueAnalysisRun, prov llm.Pro
 func (s *Server) blueUpdateRun(pg *db.DB, id int64, status string, obsID *int64, errorText string) (*db.BlueAnalysisRun, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), blueAnalysisDBTime)
 	defer cancel()
-	return pg.UpdateBlueAnalysisRun(ctx, id, status, obsID, errorText)
+	run, err := pg.UpdateBlueAnalysisRun(ctx, id, status, obsID, errorText)
+	if err == nil && (status == "completed" || status == "failed") {
+		if syncErr := pg.SyncBlueTaskFromRun(ctx, id); syncErr != nil {
+			log.Printf("[blue] sync task for analysis run %d: %v", id, syncErr)
+		}
+	}
+	return run, err
 }
 
 func (s *Server) blueListCaseAnalyses(w http.ResponseWriter, r *http.Request) {
@@ -273,5 +293,8 @@ func (s *Server) recoverBlueAnalyses() {
 	defer cancel()
 	if err := s.m.pg.FailInterruptedBlueAnalysisRuns(ctx); err != nil {
 		log.Printf("[blue] recover interrupted analyses: %v", err)
+	}
+	if err := s.m.pg.SyncFinishedBlueTaskRuns(ctx); err != nil {
+		log.Printf("[blue] recover analysis tasks: %v", err)
 	}
 }

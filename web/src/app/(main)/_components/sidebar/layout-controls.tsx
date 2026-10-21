@@ -20,6 +20,7 @@ import {
 } from "@/lib/preferences/layout-utils";
 import { PREFERENCE_DEFAULTS } from "@/lib/preferences/preferences-config";
 import { persistPreference } from "@/lib/preferences/preferences-storage";
+import { persistTeamThemeMode } from "@/lib/preferences/team-theme";
 import { THEME_VARIANTS } from "@/lib/preferences/theme";
 import { applyThemeMode } from "@/lib/preferences/theme-utils";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
@@ -43,9 +44,9 @@ export function LayoutControls() {
   const onThemeVariantChange = (value: string) => {
     const selected = THEME_VARIANTS.find((variant) => variant.value === value && variant.preset === mode);
     if (!selected) return;
+    persistTeamThemeMode(mode, selected.mode);
     applyThemeMode(selected.mode);
     setThemeMode(selected.mode);
-    void persistPreference("theme_mode", selected.mode);
   };
 
   const onContentLayoutChange = (layout: ContentLayout | "") => {

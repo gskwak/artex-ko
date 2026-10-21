@@ -153,7 +153,7 @@
   },
   "nav": {
     "group": {
-      "blue": "블루팀",
+      "blue": "기능",
       "function": "기능",
       "system": "시스템"
     },
@@ -165,7 +165,8 @@
       "blueActions": "대응 조치",
       "blueAlerts": "경보",
       "blueCases": "사건",
-      "blueDashboard": "개요",
+      "blueDashboard": "대시보드",
+      "blueDetection": "탐지",
       "blueEvents": "이벤트",
       "blueRules": "탐지 규칙",
       "chat": "대화",

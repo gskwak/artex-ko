@@ -3561,8 +3561,8 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.NotifyBaseURL != nil {
-		// Trim trailing slashes: links use fmt.Sprintf("%s/function/..."),
-		// so a trailing slash would produce a double-slash path like "//function/...".
+		// Trim trailing slashes: links use fmt.Sprintf("%s/redteam/..."),
+		// so a trailing slash would produce a double-slash path like "//redteam/...".
 		base := trimTrailingSlash(strings.TrimSpace(*req.NotifyBaseURL))
 		if base != "" && !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
 			writeErr(w, 400, errNotifyBaseURLScheme)

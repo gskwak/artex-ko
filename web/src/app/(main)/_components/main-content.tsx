@@ -27,11 +27,11 @@ function isFullBleed(pathname: string) {
       return pathname;
     }
   })();
-  // With trailingSlash enabled for static export, the list page pathname is "/function/tasks/".
+  // With trailingSlash enabled for static export, the list page pathname is "/redteam/tasks/".
   // Strip the trailing slash before checking the prefix, or the list page is mistaken for
   // a detail page and loses the global header.
   const normalized = p.replace(/\/+$/, "");
-  return normalized.startsWith("/function/tasks/");
+  return normalized.startsWith("/redteam/tasks/") || normalized.startsWith("/function/tasks/");
 }
 
 export function MainContent({ children }: { children: ReactNode }) {

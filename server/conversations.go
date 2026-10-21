@@ -119,6 +119,9 @@ func (s *Server) pgListConversations(w http.ResponseWriter, r *http.Request) {
 	items := make([]conversationListItem, 0, len(cs))
 	s.chatMu.Lock()
 	for _, c := range cs {
+		if c.AgentKey == blueChatAgentKey {
+			continue
+		}
 		items = append(items, conversationListItem{Conversation: c, Running: s.chatBusy[s.convBusyKey(c.ID)]})
 	}
 	s.chatMu.Unlock()
@@ -226,6 +229,10 @@ func (s *Server) convByID(w http.ResponseWriter, r *http.Request) (*db.DB, *db.C
 		writeErr(w, 404, "conversation not found")
 		return nil, nil, false
 	}
+	if c.AgentKey == blueChatAgentKey && !strings.HasPrefix(r.URL.Path, "/api/blue/conversations/") {
+		writeErr(w, http.StatusNotFound, "conversation not found")
+		return nil, nil, false
+	}
 	return pg, c, true
 }
 
@@ -331,6 +338,17 @@ func (s *Server) pgDeleteConversationsBatch(w http.ResponseWriter, r *http.Reque
 	if len(ids) == 0 || len(ids) > maxConversationDeleteBatch {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf(convErrIDsCount, maxConversationDeleteBatch))
 		return
+	}
+	for _, id := range ids {
+		c, err := pg.GetConversation(id)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if c != nil && c.AgentKey == blueChatAgentKey {
+			writeErr(w, http.StatusNotFound, "conversation not found")
+			return
+		}
 	}
 	for _, id := range ids {
 		s.cancelConversation(id)
