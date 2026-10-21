@@ -13,11 +13,11 @@
 FROM python:3.12-slim-bookworm
 ARG TARGETARCH
 # 상용 도구: ripgrep / curl / vim 에 더해 recon 에 자주 쓰는 도구 묶음(필요에 따라 추가·삭제).
-# Node 는 NodeSource 에서 20.x 를 설치한다: bookworm 기본 apt nodejs 는 18 이고, Playwright 는 >=20 을 요구한다.
+# Node 22 supports both Playwright and the bundled official Claude Code CLI.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates ripgrep curl wget vim git jq unzip \
       dnsutils iputils-ping netcat-openbsd inetutils-telnet whois nmap \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 # Playwright MCP 와 CLI 를 전역으로 미리 설치한다(런타임에 npx 로 네트워크 다운로드하지 않도록).
@@ -29,6 +29,9 @@ RUN npm install -g @playwright/mcp@latest @playwright/cli@latest playwright@late
     && playwright-cli --help \
     && playwright install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/*
+ARG CLAUDE_CODE_VERSION=2.1.306
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+ENV CLAUDE_CONFIG_DIR=/app/data/subscriptions/claude
 WORKDIR /app
 # 미리 컴파일한 해당 아키텍처 바이너리(dist/amd64/artex 또는 dist/arm64/artex)
 COPY dist/${TARGETARCH}/artex /app/artex

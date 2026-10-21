@@ -3699,5 +3699,32 @@
       "min": "{n} min",
       "hour": "{n} h"
     }
+  },
+  "llmSubscriptions": {
+    "title": "Subscription connections",
+    "refresh": "Refresh connection status",
+    "steps": "Connect an account below, then add a model profile, test it, save and activate it. API-key profiles keep their existing registration flow.",
+    "chatgptHint": "Use an eligible ChatGPT plan. Usage is shared with Codex / ChatGPT Work. All ChatGPT profiles use the active account below. Sign in from a browser on the same computer as ARTEX.",
+    "connected": "Connected",
+    "disconnected": "Not connected",
+    "active": "Active",
+    "reauthorize": "Sign in again",
+    "select": "Use account",
+    "disconnect": "Disconnect",
+    "openLogin": "Open OpenAI sign-in",
+    "pending": "Finish sign-in and approve plan usage in the OpenAI tab. This page checks for completion automatically.",
+    "cancel": "Cancel sign-in",
+    "usage": "Manage ChatGPT usage",
+    "revocationWarning": "Local credentials cleared. Remote revocation was not confirmed; disconnect ARTEX in ChatGPT Settings.",
+    "claudeHint": "Use your own Claude subscription through the official Claude Code CLI. ARTEX continues to run its agents and tools; CLI responses arrive after each model turn finishes.",
+    "install": "Claude Code is not installed in the ARTEX runtime. Rebuild with the updated Docker image or install the official CLI.",
+    "claudeLogin": "For Docker: run this command from the ARTEX project folder, complete official sign-in, then refresh status here.",
+    "claudeLocal": "For local deployments, use the same CLAUDE_CONFIG_DIR as ARTEX (default: data/subscriptions/claude). A login on the host is separate from the container.",
+    "claudeLogout": "To disconnect: docker compose exec artex claude auth logout",
+    "guide": "Official login guide",
+    "chatgptFormat": "ChatGPT subscription",
+    "claudeFormat": "Claude subscription (Claude Code)",
+    "profileHint": "Connect your subscription in the panel on the LLM settings page first. Select a model, test the connection, then save and activate. API keys and custom API URLs are not used. Subscription limits apply; output-token caps and per-profile rate controls are not available in this adapter.",
+    "chooseModel": "Load available models with the refresh button"
   }
 }

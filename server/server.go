@@ -28,6 +28,7 @@ import (
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/artex/notify"
 	"github.com/Autumn-27/artex/report"
+	"github.com/Autumn-27/artex/subscription"
 	"github.com/Autumn-27/artex/traffic"
 	"github.com/Autumn-27/norma/llm"
 	actool "github.com/Autumn-27/norma/tool"
@@ -109,9 +110,10 @@ const (
 // Server exposes the ARTEX backend over a JSON HTTP API for the shadcn/ui
 // frontend.
 type Server struct {
-	m      *Manager
-	engine *Engine
-	ctx    context.Context
+	subscriptions *subscription.Manager
+	m             *Manager
+	engine        *Engine
+	ctx           context.Context
 
 	skillDir string // root directory for skill subdirectories
 	jwtKey   []byte // HS256 signing key loaded from / generated into dataDir/jwt.key
@@ -230,7 +232,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	if err != nil {
 		log.Fatalf("[auth] JWT key: %v", err)
 	}
-	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, jwtKey: key, chatBusy: map[string]bool{},
+	s := &Server{subscriptions: subscription.New(filepath.Join(dataDir, "subscriptions")), m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, jwtKey: key, chatBusy: map[string]bool{},
 		chatCancel: map[string]context.CancelCauseFunc{}, triggerQ: map[string][]triggeredRun{},
 		triggerActive: map[string]int{}, triggerCfg: map[string]triggerBehavior{},
 		profChatAgents: map[int64]*agent.ChatAgent{},
@@ -436,6 +438,7 @@ func (s *Server) loadLLMConfig() (agent.Config, bool) {
 		return agent.Config{}, false
 	}
 	cfg := agent.ConfigFrom(p.Format, p.Model, p.BaseURL, p.APIKey, p.Proxy)
+	s.attachSubscriptions(&cfg)
 	cfg.RatePerSecond, cfg.RatePerMinute = p.RatePerSecond, p.RatePerMinute
 	cfg.ContextWindowK = p.ContextWindowK
 	cfg.ThinkingType = p.ThinkingType
@@ -444,7 +447,7 @@ func (s *Server) loadLLMConfig() (agent.Config, bool) {
 	cfg.MaxTokens, cfg.MaxTokensField = p.MaxTokens, p.MaxTokensField
 	cfg.SessionHeaderKey = p.SessionHeaderKey
 	s.applyProfileRetry(&cfg, p)
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && !agent.IsSubscription(cfg.Provider()) {
 		return cfg, false
 	}
 	s.cfgMu.Lock()
@@ -607,6 +610,7 @@ func (s *Server) loadProfileConfig(id int64) (agent.Config, bool) {
 		return agent.Config{}, false
 	}
 	cfg := agent.ConfigFrom(p.Format, p.Model, p.BaseURL, p.APIKey, p.Proxy)
+	s.attachSubscriptions(&cfg)
 	cfg.RatePerSecond, cfg.RatePerMinute = p.RatePerSecond, p.RatePerMinute
 	cfg.ContextWindowK = p.ContextWindowK
 	cfg.ThinkingType = p.ThinkingType
@@ -615,7 +619,7 @@ func (s *Server) loadProfileConfig(id int64) (agent.Config, bool) {
 	cfg.MaxTokens, cfg.MaxTokensField = p.MaxTokens, p.MaxTokensField
 	cfg.SessionHeaderKey = p.SessionHeaderKey
 	s.applyProfileRetry(&cfg, p)
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && !agent.IsSubscription(cfg.Provider()) {
 		return cfg, false
 	}
 	return cfg, true
@@ -760,6 +764,8 @@ func (s *Server) chatAgentRef() *agent.ChatAgent {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.registerSideRoutes(mux)
+	mux.HandleFunc("GET /api/llm/subscriptions", s.subscriptionStatus)
+	mux.HandleFunc("POST /api/llm/subscriptions/chatgpt", s.subscriptionAction)
 
 	// Auth routes — exempt from JWT check (handled in requireAuth)
 	mux.HandleFunc("GET /api/auth/status", s.authStatus)
@@ -1403,7 +1409,7 @@ func (s *Server) getLLM(w http.ResponseWriter, r *http.Request) {
 		"model":            s.llmCfg.Model,
 		"base_url":         s.llmCfg.BaseURL,
 		"proxy":            s.llmCfg.Proxy,
-		"key_set":          s.llmCfg.APIKey != "",
+		"key_set":          (s.llmCfg.APIKey != "" || agent.IsSubscription(s.llmCfg.Provider())),
 		"rate_per_second":  s.llmCfg.RatePerSecond,
 		"rate_per_minute":  s.llmCfg.RatePerMinute,
 		"context_window_k": s.llmCfg.ContextWindowK,
@@ -1431,6 +1437,7 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := agent.ConfigFrom(req.Provider, req.Model, req.BaseURL, req.APIKey, req.Proxy)
+	s.attachSubscriptions(&cfg)
 	cfg.RatePerSecond, cfg.RatePerMinute = req.RatePerSecond, req.RatePerMinute
 	cfg.ThinkingType = req.ThinkingType
 	cfg.ReasoningEffort = req.ReasoningEffort
@@ -1440,12 +1447,12 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 		}
 		cfg.ContextWindowK = k
 	}
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && !agent.IsSubscription(cfg.Provider()) {
 		s.cfgMu.Lock()
 		cfg.APIKey = s.llmCfg.APIKey // keep existing key if not re-entered
 		s.cfgMu.Unlock()
 	}
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && !agent.IsSubscription(cfg.Provider()) {
 		writeErr(w, 400, "api_key required")
 		return
 	}
@@ -1490,6 +1497,7 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := agent.ConfigFrom(req.Provider, req.Model, req.BaseURL, req.APIKey, req.Proxy)
+	s.attachSubscriptions(&cfg)
 	// mirror production: send the SAME thinking params so a provider that rejects the
 	// reasoning_effort/thinking field fails the test too (no false "test ok, run 400").
 	cfg.ThinkingType = req.ThinkingType
@@ -1506,9 +1514,9 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// API key precedence: form input, specified profile's stored key, then global key.
 	// Stored profile keys are not returned to the browser, so fetch the key from the DB for tests.
 	// Likewise, use the saved profile's session-header name when the form omits it.
-	if req.ProfileID != nil && (cfg.APIKey == "" || cfg.SessionHeaderKey == "") {
+	if req.ProfileID != nil && ((cfg.APIKey == "" && !agent.IsSubscription(cfg.Provider())) || cfg.SessionHeaderKey == "") {
 		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
-			if cfg.APIKey == "" {
+			if cfg.APIKey == "" && !agent.IsSubscription(cfg.Provider()) {
 				cfg.APIKey = p.APIKey
 			}
 			if cfg.SessionHeaderKey == "" {
@@ -1516,12 +1524,12 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && !agent.IsSubscription(cfg.Provider()) {
 		s.cfgMu.Lock()
 		cfg.APIKey = s.llmCfg.APIKey
 		s.cfgMu.Unlock()
 	}
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && !agent.IsSubscription(cfg.Provider()) {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": trMsg(errLLMTestNoAPIKey)})
 		return
 	}

@@ -140,6 +140,8 @@ Upstream provides several methods: an install script (`./install.sh`), precompil
 
 **LLM:** `export ANTHROPIC_API_KEY=sk-...` (or `OPENAI_API_KEY`), or enter it on the UI's "LLM settings" page. Optional environment variables: `ARTEX_LLM_PROVIDER` / `ARTEX_LLM_MODEL` / `ARTEX_LLM_BASE_URL` / `ARTEX_LLM_PROXY`. To use a domestic or open model, point `ARTEX_LLM_BASE_URL` at an OpenAI-compatible endpoint.
 
+**Subscriptions:** LLM settings also offers ChatGPT plan sign-in and Claude subscriptions through the official Claude Code CLI. See the [registration comparison and setup guide](docs/subscription-models.md) for authentication, limits, and deployment instructions.
+
 **Output language:** this edition forces user-facing output into Korean via a small, code-fixed directive appended to each role's system prompt (it does not translate the reasoning body). If you need a different output language, adapt that directive in `agent/prompt.go` (`langDirective`).
 
 **Concurrency:** the number of worker agents spawned per task is adjustable under "System settings" (default 3).

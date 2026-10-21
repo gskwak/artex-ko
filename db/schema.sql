@@ -362,7 +362,7 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS llm_profiles (
     id               BIGSERIAL PRIMARY KEY,
     name             TEXT NOT NULL UNIQUE,
-    format           TEXT NOT NULL CHECK (format IN ('openai','anthropic','openai-responses')),
+    format           TEXT NOT NULL CHECK (format IN ('openai','anthropic','openai-responses','chatgpt','claude-code')),
     base_url         TEXT,
     proxy            TEXT,
     model            TEXT NOT NULL,
@@ -419,7 +419,7 @@ ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS streaming    BOOLEAN NOT NULL 
 -- Run on every startup, idempotently: drop the old CHECK and add the new three-value CHECK.
 ALTER TABLE llm_profiles DROP CONSTRAINT IF EXISTS llm_profiles_format_check;
 ALTER TABLE llm_profiles ADD  CONSTRAINT llm_profiles_format_check
-    CHECK (format IN ('openai','anthropic','openai-responses'));
+    CHECK (format IN ('openai','anthropic','openai-responses','chatgpt','claude-code'));
 
 -- Output limit and its field name for existing databases. Defaults 0 / '' omit the limit and retain max_tokens;
 -- existing profiles keep their behavior.
