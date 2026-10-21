@@ -113,13 +113,8 @@ export const blueSidebarItems: NavGroup[] = [
       {
         id: "blueInvestigation",
         title: "Investigation",
-        subItems: [
-          { id: "blueCases", title: "Cases", url: "/blue/cases" },
-          { id: "blueEvents", title: "Events", url: "/blue/events" },
-          { id: "blueTraffic", title: "Traffic", url: "/blue/traffic" },
-          { id: "blueDetection", title: "Detection", url: "/blue/detection" },
-          { id: "blueActions", title: "Response actions", url: "/blue/actions" },
-        ],
+        url: "/blue/cases",
+        activeUrls: ["/blue/events", "/blue/traffic", "/blue/detection", "/blue/actions"],
         icon: ShieldCheck,
       },
       { id: "llm-records", title: "LLM records", url: "/blue/llm-records", icon: Radio },
