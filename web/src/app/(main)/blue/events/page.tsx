@@ -504,14 +504,15 @@ export default function BlueEventsPage() {
         title={copy.events}
         description={copy.eventsDescription}
         actions={
-          <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
-            <RefreshCw className={loading ? "animate-spin" : ""} />
-            {copy.refresh}
-          </Button>
+          <>
+            <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
+              <RefreshCw className={loading ? "animate-spin" : ""} />
+              {copy.refresh}
+            </Button>
+            <BlueInvestigationTabs active="events" />
+          </>
         }
       />
-
-      <BlueInvestigationTabs active="events" />
 
       <Card>
         <CardHeader className="pb-2">

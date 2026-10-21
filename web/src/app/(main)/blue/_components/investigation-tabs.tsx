@@ -1,10 +1,11 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { useTranslations } from "next-intl";
 
-import { cn } from "@/lib/utils";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type InvestigationSection = "cases" | "events" | "traffic" | "detection" | "actions";
 
@@ -18,25 +19,39 @@ const sections = [
 
 export function BlueInvestigationTabs({ active }: { active: InvestigationSection }) {
   const t = useTranslations("nav.item");
+  const router = useRouter();
+  const label = t.has("blueInvestigation") ? t("blueInvestigation") : t("blueCases");
+
+  const selectSection = (value: string) => {
+    const section = sections.find((item) => item.id === value);
+    if (section && section.id !== active) router.push(section.href);
+  };
 
   return (
-    <nav
-      aria-label={t.has("blueInvestigation") ? t("blueInvestigation") : t("blueCases")}
-      className="flex w-fit max-w-full gap-1 overflow-x-auto rounded-lg bg-muted p-[3px]"
-    >
-      {sections.map((section) => (
-        <Link
-          key={section.id}
-          href={section.href}
-          aria-current={active === section.id ? "page" : undefined}
-          className={cn(
-            "shrink-0 rounded-md px-3 py-1 text-sm font-medium whitespace-nowrap text-foreground/60 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            active === section.id && "bg-background text-foreground shadow-sm",
-          )}
-        >
-          {t(section.label)}
-        </Link>
-      ))}
+    <nav aria-label={label} className="shrink-0">
+      <Tabs value={active} onValueChange={selectSection} className="hidden lg:flex">
+        <TabsList aria-label={label}>
+          {sections.map((section) => (
+            <TabsTrigger key={section.id} value={section.id}>
+              {t(section.label)}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+      <div className="lg:hidden">
+        <Select value={active} onValueChange={selectSection}>
+          <SelectTrigger size="sm" aria-label={label} className="w-44">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {sections.map((section) => (
+              <SelectItem key={section.id} value={section.id}>
+                {t(section.label)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
     </nav>
   );
 }

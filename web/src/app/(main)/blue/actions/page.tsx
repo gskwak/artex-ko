@@ -4,13 +4,12 @@ import * as React from "react";
 
 import Link from "next/link";
 
-import { Check, ClipboardCheck, RefreshCw, X } from "lucide-react";
-import { useLocale } from "next-intl";
+import { Check, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -20,11 +19,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { useActiveLocale } from "@/i18n/locale-store";
 import { type BlueOverview, blueRequest } from "@/lib/blue-api";
 
+import { BlueEmpty, BlueError, BlueLoading, BluePageHeader, blueDate } from "../_components/blue-ui";
 import { BlueInvestigationTabs } from "../_components/investigation-tabs";
 
 type ActionStatus = "pending" | "approved" | "rejected" | "completed" | "failed";
@@ -335,12 +335,6 @@ const ES: Copy = {
 
 const COPY_BY_LOCALE: Record<string, Copy> = { en: EN, ko: KO, zh: ZH, es: ES };
 
-function formatTime(value: string | null | undefined, locale: string): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(locale === "ko" ? "ko-KR" : "en-US");
-}
-
 function statusBadge(status: ActionStatus, label: string) {
   if (status === "approved" || status === "completed") return <Badge variant="secondary">{label}</Badge>;
   if (status === "rejected" || status === "failed") return <Badge variant="destructive">{label}</Badge>;
@@ -352,7 +346,7 @@ function statusBadge(status: ActionStatus, label: string) {
 }
 
 export default function BlueActionsPage() {
-  const locale = useLocale();
+  const locale = useActiveLocale();
   const t = COPY_BY_LOCALE[locale] ?? EN;
   const statusNotice: Record<ActionStatus, string> = {
     pending: "",
@@ -377,6 +371,7 @@ export default function BlueActionsPage() {
   const [loading, setLoading] = React.useState(true);
   const [loadingMore, setLoadingMore] = React.useState(false);
   const [hasMore, setHasMore] = React.useState(false);
+  const [error, setError] = React.useState("");
   const [pendingCount, setPendingCount] = React.useState<number | null>(null);
   const nextOffset = React.useRef(0);
   const requestVersion = React.useRef(0);
@@ -391,6 +386,10 @@ export default function BlueActionsPage() {
     const version = ++requestVersion.current;
     setLoading(true);
     setLoadingMore(false);
+    setError("");
+    setActions([]);
+    setHasMore(false);
+    nextOffset.current = 0;
     try {
       const statusQuery = filter === "all" ? "" : `&status=${filter}`;
       const rows = await blueRequest<BlueAction[]>(`/actions?limit=${PAGE_SIZE}${statusQuery}`);
@@ -409,7 +408,7 @@ export default function BlueActionsPage() {
     } catch (error) {
       if (version === requestVersion.current) {
         setPendingCount(null);
-        toast.error(error instanceof Error ? `${t.loadError}: ${error.message}` : t.loadError);
+        setError(error instanceof Error ? `${t.loadError}: ${error.message}` : t.loadError);
       }
     } finally {
       if (version === requestVersion.current) setLoading(false);
@@ -484,158 +483,151 @@ export default function BlueActionsPage() {
   }
 
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            <ClipboardCheck className="size-6 text-primary" /> {t.title}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t.subtitle}</p>
-        </div>
-        <Button variant="outline" onClick={() => void load()} disabled={loading}>
-          <RefreshCw className="size-4" /> {t.refresh}
-        </Button>
-      </div>
+    <div className="space-y-5 pb-6">
+      <BluePageHeader
+        title={t.title}
+        description={t.subtitle}
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
+              <RefreshCw aria-hidden="true" className={loading ? "animate-spin" : ""} />
+              {t.refresh}
+            </Button>
+            <BlueInvestigationTabs active="actions" />
+          </>
+        }
+      />
 
-      <BlueInvestigationTabs active="actions" />
-
-      <div role="note" className="rounded-lg border border-blue-300/50 bg-blue-500/5 px-4 py-3 text-sm text-foreground">
+      <div role="note" className="rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
         {t.boundary}
       </div>
 
-      <Card>
-        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-4">
-          <div>
-            <CardTitle className="text-base">{t.title}</CardTitle>
-            <CardDescription>
-              {t.pending}: {pendingCount ?? "—"}
-            </CardDescription>
-          </div>
-          <div className="flex items-center gap-2">
-            <Label htmlFor="blue-action-filter">{t.filter}</Label>
-            <Select value={filter} onValueChange={(value) => setFilter(value as StatusFilter)}>
-              <SelectTrigger id="blue-action-filter" className="w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="pending">{t.pending}</SelectItem>
-                <SelectItem value="all">{t.all}</SelectItem>
-                <SelectItem value="approved">{t.approved}</SelectItem>
-                <SelectItem value="rejected">{t.rejected}</SelectItem>
-                <SelectItem value="completed">{t.completed}</SelectItem>
-                <SelectItem value="failed">{t.failed}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">{t.loading}</p>
-          ) : visible.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">{t.empty}</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t.case}</TableHead>
-                    <TableHead>{t.action}</TableHead>
-                    <TableHead>{t.target}</TableHead>
-                    <TableHead>{t.status}</TableHead>
-                    <TableHead>{t.requested}</TableHead>
-                    <TableHead className="text-right">{t.decision}</TableHead>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">
+          {t.pending}: <span className="font-medium text-foreground">{pendingCount ?? "—"}</span>
+        </p>
+        <div className="flex items-center gap-2">
+          <Label htmlFor="blue-action-filter" className="text-sm text-muted-foreground">
+            {t.filter}
+          </Label>
+          <select
+            id="blue-action-filter"
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+            value={filter}
+            onChange={(event) => setFilter(event.target.value as StatusFilter)}
+          >
+            <option value="pending">{t.pending}</option>
+            <option value="all">{t.all}</option>
+            <option value="approved">{t.approved}</option>
+            <option value="rejected">{t.rejected}</option>
+            <option value="completed">{t.completed}</option>
+            <option value="failed">{t.failed}</option>
+          </select>
+        </div>
+      </div>
+
+      {error && <BlueError message={error} retry={() => void load()} retryLabel={t.refresh} />}
+      {loading && <BlueLoading label={t.loading} />}
+      {!loading && !error && visible.length === 0 && <BlueEmpty message={t.empty} />}
+      {visible.length > 0 && (
+        <Card className="gap-0 overflow-hidden p-0">
+          <div className="overflow-x-auto">
+            <Table className="min-w-[900px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t.case}</TableHead>
+                  <TableHead>{t.action}</TableHead>
+                  <TableHead>{t.target}</TableHead>
+                  <TableHead>{t.status}</TableHead>
+                  <TableHead>{t.requested}</TableHead>
+                  <TableHead className="text-right">{t.decision}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {visible.map((action) => (
+                  <TableRow key={action.id}>
+                    <TableCell>
+                      <Link
+                        className="text-primary underline-offset-2 hover:underline"
+                        href={`/blue/cases/detail?id=${action.case_id}`}
+                      >
+                        #{action.case_id}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="min-w-52">
+                      <div className="font-medium">{actionKindLabel(action.kind, locale)}</div>
+                      {action.rationale && (
+                        <p className="mt-1 max-w-80 text-xs text-muted-foreground">{action.rationale}</p>
+                      )}
+                      {action.requested_by && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {t.requestedBy}: {action.requested_by}
+                        </p>
+                      )}
+                    </TableCell>
+                    <TableCell className="max-w-56 break-all font-mono text-xs">{action.target || "—"}</TableCell>
+                    <TableCell>
+                      {statusBadge(action.status, t[action.status])}
+                      {action.status !== "pending" && (
+                        <p className="mt-1 max-w-56 text-xs text-muted-foreground">{statusNotice[action.status]}</p>
+                      )}
+                      {action.status !== "pending" && action.decision_note && (
+                        <p className="mt-1 max-w-56 text-xs">{action.decision_note}</p>
+                      )}
+                      {action.decided_at && (
+                        <p className="mt-1 max-w-56 text-xs text-muted-foreground">
+                          {t.decidedBy}: {action.decided_by || "—"} · {blueDate(action.decided_at, locale)}
+                        </p>
+                      )}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-xs">{blueDate(action.created_at, locale)}</TableCell>
+                    <TableCell>
+                      {action.status === "pending" ? (
+                        <div className="flex justify-end gap-1.5">
+                          <Button size="sm" variant="outline" onClick={() => openDecision(action, "reject")}>
+                            <X className="size-3.5" /> {t.reject}
+                          </Button>
+                          <Button size="sm" onClick={() => openDecision(action, "approve")}>
+                            <Check className="size-3.5" /> {t.approve}
+                          </Button>
+                        </div>
+                      ) : action.status === "approved" ? (
+                        <div className="flex justify-end gap-1.5">
+                          <Button size="sm" variant="outline" onClick={() => openDecision(action, "fail")}>
+                            {t.fail}
+                          </Button>
+                          <Button size="sm" onClick={() => openDecision(action, "complete")}>
+                            {t.complete}
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="max-w-64 text-right text-xs text-muted-foreground">
+                          {action.status === "rejected" && <span>—</span>}
+                          {action.completion_note && <p className="mt-1">{action.completion_note}</p>}
+                          {action.completion_evidence && <p className="mt-1 break-all">{action.completion_evidence}</p>}
+                          {action.completed_at && (
+                            <p>
+                              {action.completed_by || "—"} · {blueDate(action.completed_at, locale)}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {visible.map((action) => (
-                    <TableRow key={action.id}>
-                      <TableCell>
-                        <Link
-                          className="text-primary underline-offset-2 hover:underline"
-                          href={`/blue/cases/detail?id=${action.case_id}`}
-                        >
-                          #{action.case_id}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="min-w-52">
-                        <div className="font-medium">{actionKindLabel(action.kind, locale)}</div>
-                        {action.rationale && (
-                          <p className="mt-1 max-w-80 text-xs text-muted-foreground">{action.rationale}</p>
-                        )}
-                        {action.requested_by && (
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {t.requestedBy}: {action.requested_by}
-                          </p>
-                        )}
-                      </TableCell>
-                      <TableCell className="max-w-56 break-all font-mono text-xs">{action.target || "—"}</TableCell>
-                      <TableCell>
-                        {statusBadge(action.status, t[action.status])}
-                        {action.status !== "pending" && (
-                          <p className="mt-1 max-w-56 text-xs text-muted-foreground">{statusNotice[action.status]}</p>
-                        )}
-                        {action.status !== "pending" && action.decision_note && (
-                          <p className="mt-1 max-w-56 text-xs">{action.decision_note}</p>
-                        )}
-                        {action.decided_at && (
-                          <p className="mt-1 max-w-56 text-xs text-muted-foreground">
-                            {t.decidedBy}: {action.decided_by || "—"} · {formatTime(action.decided_at, locale)}
-                          </p>
-                        )}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-xs">
-                        {formatTime(action.created_at, locale)}
-                      </TableCell>
-                      <TableCell>
-                        {action.status === "pending" ? (
-                          <div className="flex justify-end gap-1.5">
-                            <Button size="sm" variant="outline" onClick={() => openDecision(action, "reject")}>
-                              <X className="size-3.5" /> {t.reject}
-                            </Button>
-                            <Button size="sm" onClick={() => openDecision(action, "approve")}>
-                              <Check className="size-3.5" /> {t.approve}
-                            </Button>
-                          </div>
-                        ) : action.status === "approved" ? (
-                          <div className="flex justify-end gap-1.5">
-                            <Button size="sm" variant="outline" onClick={() => openDecision(action, "fail")}>
-                              {t.fail}
-                            </Button>
-                            <Button size="sm" onClick={() => openDecision(action, "complete")}>
-                              {t.complete}
-                            </Button>
-                          </div>
-                        ) : (
-                          <div className="max-w-64 text-right text-xs text-muted-foreground">
-                            {action.status === "rejected" && <span>—</span>}
-                            {action.completion_note && <p className="mt-1">{action.completion_note}</p>}
-                            {action.completion_evidence && (
-                              <p className="mt-1 break-all">{action.completion_evidence}</p>
-                            )}
-                            {action.completed_at && (
-                              <p>
-                                {action.completed_by || "—"} · {formatTime(action.completed_at, locale)}
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
+                ))}
+              </TableBody>
+            </Table>
+          </div>
           {hasMore && !loading && (
-            <div className="mt-4 text-center">
+            <div className="flex justify-center border-t px-4 py-3">
               <Button variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>
                 {t.loadMore}
                 {loadingMore ? "…" : ""}
               </Button>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </Card>
+      )}
 
       <Dialog open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
         <DialogContent>

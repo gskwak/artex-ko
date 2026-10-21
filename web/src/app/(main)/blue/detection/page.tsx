@@ -49,8 +49,7 @@ export default function BlueDetectionPage() {
 
   return (
     <div className="space-y-5">
-      <BluePageHeader title={t("blueDetection")} />
-      <BlueInvestigationTabs active="detection" />
+      <BluePageHeader title={t("blueDetection")} actions={<BlueInvestigationTabs active="detection" />} />
       <React.Suspense fallback={null}>
         <DetectionTabs />
       </React.Suspense>

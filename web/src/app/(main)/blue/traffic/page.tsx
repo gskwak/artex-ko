@@ -76,13 +76,15 @@ export default function BlueTrafficPage() {
         title={copy.title}
         description={copy.subtitle}
         actions={
-          <Button variant="outline" size="sm" onClick={() => setReload((value) => value + 1)} disabled={loading}>
-            <RefreshCw aria-hidden="true" className={loading ? "animate-spin" : ""} />
-            {copy.refresh}
-          </Button>
+          <>
+            <Button variant="outline" size="sm" onClick={() => setReload((value) => value + 1)} disabled={loading}>
+              <RefreshCw aria-hidden="true" className={loading ? "animate-spin" : ""} />
+              {copy.refresh}
+            </Button>
+            <BlueInvestigationTabs active="traffic" />
+          </>
         }
       />
-      <BlueInvestigationTabs active="traffic" />
 
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
         <span>{copy.trafficHint}</span>

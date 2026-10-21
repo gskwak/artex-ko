@@ -4,23 +4,12 @@ import * as React from "react";
 
 import Link from "next/link";
 
-import { ArrowRight, Plus, RefreshCw, Search } from "lucide-react";
+import { ArrowRight, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { useActiveLocale } from "@/i18n/locale-store";
 import { type BlueCase, type BlueCaseStatus, type BlueSeverity, blueApi } from "@/lib/blue-api";
 import { blueCaseStatusLabel, blueSeverityLabel, useBlueCopy } from "@/lib/blue-copy";
@@ -53,11 +42,6 @@ export default function BlueCasesPage() {
   const [query, setQuery] = React.useState("");
   const [status, setStatus] = React.useState<BlueCaseStatus | "all">("all");
   const [severity, setSeverity] = React.useState<BlueSeverity | "all">("all");
-  const [createOpen, setCreateOpen] = React.useState(false);
-  const [creating, setCreating] = React.useState(false);
-  const [title, setTitle] = React.useState("");
-  const [description, setDescription] = React.useState("");
-  const [newSeverity, setNewSeverity] = React.useState<BlueSeverity>("medium");
   const loadVersion = React.useRef(0);
 
   React.useEffect(() => {
@@ -121,29 +105,6 @@ export default function BlueCasesPage() {
     }
   }
 
-  async function createCase(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!title.trim()) return;
-    setCreating(true);
-    try {
-      await blueApi.createCase({
-        title: title.trim(),
-        description: description.trim(),
-        severity: newSeverity,
-      });
-      void load();
-      setTitle("");
-      setDescription("");
-      setNewSeverity("medium");
-      setCreateOpen(false);
-      toast.success(copy.saved);
-    } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : copy.saveFailed);
-    } finally {
-      setCreating(false);
-    }
-  }
-
   return (
     <div className="space-y-5">
       <BluePageHeader
@@ -155,70 +116,10 @@ export default function BlueCasesPage() {
               <RefreshCw className={loading ? "animate-spin" : ""} />
               {copy.refresh}
             </Button>
-            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm">
-                  <Plus />
-                  {copy.createCase}
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>{copy.createCase}</DialogTitle>
-                  <DialogDescription>{copy.casesDescription}</DialogDescription>
-                </DialogHeader>
-                <form onSubmit={(event) => void createCase(event)} className="space-y-4">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="blue-case-title">{copy.caseTitle}</Label>
-                    <Input
-                      id="blue-case-title"
-                      value={title}
-                      onChange={(event) => setTitle(event.target.value)}
-                      maxLength={240}
-                      required
-                      autoFocus
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="blue-case-description">{copy.description}</Label>
-                    <Textarea
-                      id="blue-case-description"
-                      value={description}
-                      onChange={(event) => setDescription(event.target.value)}
-                      rows={4}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="blue-case-severity">{copy.severity}</Label>
-                    <select
-                      id="blue-case-severity"
-                      className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                      value={newSeverity}
-                      onChange={(event) => setNewSeverity(event.target.value as BlueSeverity)}
-                    >
-                      {SEVERITIES.map((value) => (
-                        <option key={value} value={value}>
-                          {blueSeverityLabel(value, locale)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <DialogFooter>
-                    <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
-                      {copy.cancel}
-                    </Button>
-                    <Button type="submit" disabled={creating || !title.trim()}>
-                      {creating ? copy.creating : copy.create}
-                    </Button>
-                  </DialogFooter>
-                </form>
-              </DialogContent>
-            </Dialog>
+            <BlueInvestigationTabs active="cases" />
           </>
         }
       />
-
-      <BlueInvestigationTabs active="cases" />
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-48 flex-1">
