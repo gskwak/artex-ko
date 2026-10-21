@@ -5,6 +5,7 @@ import {
   Bot,
   Brain,
   Bug,
+  ClipboardCheck,
   ClipboardList,
   FolderOpen,
   FolderSync,
@@ -17,6 +18,7 @@ import {
   ScrollText,
   Settings2,
   ShieldAlert,
+  ShieldCheck,
   Sparkles,
   Target,
   Terminal,
@@ -61,7 +63,21 @@ export interface NavGroup {
   items: NavMainItem[];
 }
 
-export const sidebarItems: NavGroup[] = [
+const systemItems: NavMainItem[] = [
+  { id: "llm", title: "LLM", url: "/system/llm", icon: Brain },
+  { id: "agents", title: "Agent", url: "/system/agents", icon: Bot },
+  { id: "mcp", title: "MCP", url: "/system/mcp", icon: Plug },
+  { id: "skills", title: "Skill", url: "/system/skills", icon: Sparkles },
+  { id: "tools", title: "Tools", url: "/system/tools", icon: Wrench },
+  { id: "notify", title: "Notifications", url: "/system/notify", icon: BellRing },
+  { id: "intercept", title: "Intercept rules", url: "/system/intercept", icon: ShieldAlert },
+  { id: "asset-intercept", title: "Asset intercept", url: "/system/intercept/assets", icon: Ban },
+  { id: "approvals", title: "Approval records", url: "/system/intercept/approvals", icon: ClipboardList },
+  { id: "logs", title: "Logs", url: "/system/logs", icon: ScrollText },
+  { id: "settings", title: "System settings", url: "/system/settings", icon: Settings2 },
+];
+
+export const redSidebarItems: NavGroup[] = [
   {
     id: 1,
     label: "Features",
@@ -81,18 +97,30 @@ export const sidebarItems: NavGroup[] = [
   {
     id: 2,
     label: "System",
-    items: [
-      { id: "llm", title: "LLM", url: "/system/llm", icon: Brain },
-      { id: "agents", title: "Agent", url: "/system/agents", icon: Bot },
-      { id: "mcp", title: "MCP", url: "/system/mcp", icon: Plug },
-      { id: "skills", title: "Skill", url: "/system/skills", icon: Sparkles },
-      { id: "tools", title: "Tools", url: "/system/tools", icon: Wrench },
-      { id: "notify", title: "Notifications", url: "/system/notify", icon: BellRing },
-      { id: "intercept", title: "Intercept rules", url: "/system/intercept", icon: ShieldAlert },
-      { id: "asset-intercept", title: "Asset intercept", url: "/system/intercept/assets", icon: Ban },
-      { id: "approvals", title: "Approval records", url: "/system/intercept/approvals", icon: ClipboardList },
-      { id: "logs", title: "Logs", url: "/system/logs", icon: ScrollText },
-      { id: "settings", title: "System settings", url: "/system/settings", icon: Settings2 },
-    ],
+    items: systemItems,
   },
 ];
+
+export const blueSidebarItems: NavGroup[] = [
+  {
+    id: 3,
+    label: "Blue team",
+    items: [
+      { id: "blueDashboard", title: "Overview", url: "/blue/dashboard", icon: LayoutDashboard },
+      { id: "blueCases", title: "Cases", url: "/blue/cases", icon: FolderOpen },
+      { id: "blueAlerts", title: "Alerts", url: "/blue/alerts", icon: BellRing },
+      { id: "blueEvents", title: "Events", url: "/blue/events", icon: ScrollText },
+      { id: "blueRules", title: "Detection rules", url: "/blue/rules", icon: ShieldCheck },
+      { id: "blueActions", title: "Response actions", url: "/blue/actions", icon: ClipboardCheck },
+      { id: "assets", title: "Assets", url: "/function/assets", icon: Network },
+    ],
+  },
+  {
+    id: 2,
+    label: "System",
+    items: systemItems.filter((item) => !["intercept", "asset-intercept", "approvals"].includes(item.id)),
+  },
+];
+
+// Keep the original export for consumers that still render the red-team menu.
+export const sidebarItems = redSidebarItems;

@@ -153,6 +153,7 @@
   },
   "nav": {
     "group": {
+      "blue": "Blue team",
       "function": "Features",
       "system": "System"
     },
@@ -161,6 +162,12 @@
       "approvals": "Approvals",
       "asset-intercept": "Asset blocking",
       "assets": "Assets",
+      "blueActions": "Response actions",
+      "blueAlerts": "Alerts",
+      "blueCases": "Cases",
+      "blueDashboard": "Overview",
+      "blueEvents": "Events",
+      "blueRules": "Detection rules",
       "chat": "Chat",
       "commands": "Tool runs",
       "dashboard": "Dashboard",
@@ -179,6 +186,13 @@
       "traffic": "Traffic",
       "workspace": "Workspace"
     }
+  },
+  "teamMode": {
+    "label": "Team mode",
+    "red": "Red team",
+    "blue": "Blue team",
+    "switchToRed": "Switch to Red team",
+    "switchToBlue": "Switch to Blue team"
   },
   "notFound": {
     "back": "Back to home",
@@ -953,6 +967,10 @@
       "triggers": "Triggers"
     },
     "notFound": "Agent not found: {key}",
+    "blueAnalyst": {
+      "description": "Blue Team analyst reviews evidence and writes defensive assessments. It calls the selected model directly without shell, MCP, skills, tools, or triggers.",
+      "modelHint": "Choose the model for defensive analysis, then save settings. The default option follows the active LLM configuration."
+    },
     "llm": {
       "label": "Default model (LLM config)",
       "follow": "Follow task / global active config",
@@ -1855,6 +1873,8 @@
     "empty": "(no agents)",
     "new": "New agent",
     "badgeBuiltin": "Built-in",
+    "badgeBlueAnalyst": "Blue Team analyst",
+    "blueAnalystDescription": "Defensive analysis with an LLM and no tool execution. Edit its model and prompt below.",
     "badgeCustom": "Custom",
     "badgeDisabled": "Disabled",
     "noDescription": "(no description)",

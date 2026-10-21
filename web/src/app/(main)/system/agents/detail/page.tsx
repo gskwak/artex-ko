@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
 import { ArrowLeftIcon } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { AgentEditor } from "@/components/agent-editor";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import { Button } from "@/components/ui/button";
 function AgentDetailInner() {
   const searchParams = useSearchParams();
   const key = searchParams.get("key") ?? "";
+  const t = useTranslations("agentsPage");
 
   return (
     <div className="flex flex-1 flex-col gap-4">
@@ -26,7 +28,9 @@ function AgentDetailInner() {
           </Link>
         </Button>
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Agent</h1>
+          <h1 className="text-xl font-semibold tracking-tight">
+            {key === "blue_analyst" ? t("badgeBlueAnalyst") : t("title")}
+          </h1>
           <p className="text-muted-foreground font-mono text-xs">{key}</p>
         </div>
       </div>

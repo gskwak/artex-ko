@@ -4264,7 +4264,13 @@ export function llmRecordDetail(id: number, records = llmRecords) {
       {
         model: item.model,
         system: "You are the executor in an authorized penetration testing system... (omitted)",
-        messages: [{ role: "user", content: "Execute the intent in the system prompt. Work only on that intent, produce only facts, and stop when done." }],
+        messages: [
+          {
+            role: "user",
+            content:
+              "Execute the intent in the system prompt. Work only on that intent, produce only facts, and stop when done.",
+          },
+        ],
         tools: ["bash", "insert_assets", "record_fact", "report_finding"],
       },
       null,
@@ -4289,9 +4295,19 @@ export function llmRecordDetail(id: number, records = llmRecords) {
       max_tokens: 8192,
       stream: true,
       system: [
-        { type: "text", text: "You are the executor in an authorized penetration testing system... (omitted)", cache_control: { type: "ephemeral" } },
+        {
+          type: "text",
+          text: "You are the executor in an authorized penetration testing system... (omitted)",
+          cache_control: { type: "ephemeral" },
+        },
       ],
-      messages: [{ role: "user", content: "Execute the intent in the system prompt. Work only on that intent, produce only facts, and stop when done." }],
+      messages: [
+        {
+          role: "user",
+          content:
+            "Execute the intent in the system prompt. Work only on that intent, produce only facts, and stop when done.",
+        },
+      ],
       tools: [
         {
           name: "bash",

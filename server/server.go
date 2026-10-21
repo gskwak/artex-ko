@@ -368,6 +368,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	go s.reconcileConcurrency()
 	s.startTaskArchiveWorker()
 	s.wireInterceptReviewer() // LLM fallback approval: let the model judge commands unmatched by intercept rules.
+	s.recoverBlueAnalyses()   // Previous-process jobs no longer have a running analyst.
 	return s
 }
 
@@ -764,6 +765,7 @@ func (s *Server) chatAgentRef() *agent.ChatAgent {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.registerSideRoutes(mux)
+	s.registerBlueRoutes(mux)
 	mux.HandleFunc("GET /api/llm/subscriptions", s.subscriptionStatus)
 	mux.HandleFunc("POST /api/llm/subscriptions/chatgpt", s.subscriptionAction)
 

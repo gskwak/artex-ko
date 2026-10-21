@@ -153,6 +153,7 @@
   },
   "nav": {
     "group": {
+      "blue": "Equipo azul",
       "function": "Funciones",
       "system": "Sistema"
     },
@@ -161,6 +162,12 @@
       "approvals": "Aprobaciones",
       "asset-intercept": "Bloqueo de activos",
       "assets": "Activos",
+      "blueActions": "Acciones de respuesta",
+      "blueAlerts": "Alertas",
+      "blueCases": "Casos",
+      "blueDashboard": "Resumen",
+      "blueEvents": "Eventos",
+      "blueRules": "Reglas de detección",
       "chat": "Chat",
       "commands": "Ejecución de herramientas",
       "dashboard": "Panel",
@@ -179,6 +186,13 @@
       "traffic": "Tráfico",
       "workspace": "Espacio de trabajo"
     }
+  },
+  "teamMode": {
+    "label": "Modo de equipo",
+    "red": "Equipo rojo",
+    "blue": "Equipo azul",
+    "switchToRed": "Cambiar al equipo rojo",
+    "switchToBlue": "Cambiar al equipo azul"
   },
   "notFound": {
     "back": "Volver al inicio",
@@ -953,6 +967,10 @@
       "triggers": "Disparadores"
     },
     "notFound": "Agente no encontrado: {key}",
+    "blueAnalyst": {
+      "description": "El analista del equipo azul revisa la evidencia y redacta evaluaciones defensivas. Usa directamente el modelo seleccionado, sin shell, MCP, habilidades, herramientas ni activadores.",
+      "modelHint": "Elige el modelo para el análisis defensivo y guarda la configuración. La opción predeterminada sigue la configuración de LLM activa."
+    },
     "llm": {
       "label": "Modelo predeterminado (configuración de LLM)",
       "follow": "Seguir la configuración activa de tarea / global",
@@ -1855,6 +1873,8 @@
     "empty": "(sin agentes)",
     "new": "Nuevo agente",
     "badgeBuiltin": "Integrado",
+    "badgeBlueAnalyst": "Analista del equipo azul",
+    "blueAnalystDescription": "Análisis defensivo con un LLM y sin ejecutar herramientas. Edita el modelo y el prompt abajo.",
     "badgeCustom": "Personalizado",
     "badgeDisabled": "Desactivado",
     "noDescription": "(sin descripción)",

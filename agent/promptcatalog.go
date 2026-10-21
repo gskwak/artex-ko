@@ -1,5 +1,7 @@
 package agent
 
+import "github.com/Autumn-27/artex/blue/analysis"
+
 // This file catalogs the built-in agents' default prompt bodies (section [A])
 // so the server can seed them idempotently into agent_prompts, mirroring
 // BuiltinToolSeeds() in toolcatalog.go.
@@ -115,11 +117,12 @@ First **extract task_id, the exploration node_id, and the separate finding_id fr
 // source while the same string stays as the in-code render fallback.
 func BuiltinPromptSeeds() map[string]string {
 	return map[string]string{
-		"goals":     goalsDefaultTmpl,
-		"planner":   plannerDefaultTmpl,
-		"mainagent": mainAgentDefaultTmpl,
-		"worker":    workerDefaultTmpl,
-		"auto":      autoDefaultTmpl,
-		"pentest":   pentestDefaultTmpl,
+		"goals":        goalsDefaultTmpl,
+		"planner":      plannerDefaultTmpl,
+		"mainagent":    mainAgentDefaultTmpl,
+		"worker":       workerDefaultTmpl,
+		"auto":         autoDefaultTmpl,
+		"pentest":      pentestDefaultTmpl,
+		"blue_analyst": analysis.SystemPrompt,
 	}
 }

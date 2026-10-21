@@ -439,6 +439,12 @@ func (s *Server) pgSaveAgentConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
+	if blueAnalysisOnlyAgent(a, a.Key) && (req.MaxTurns != nil || req.RunSeconds != nil ||
+		req.WebSearch != nil || req.InteractiveShell != nil || req.TriggerRunMode != nil ||
+		req.TriggerMergeMode != nil || req.TriggerMaxParallel != nil) {
+		writeErr(w, http.StatusBadRequest, "blue analyst accepts only llm_profile_id configuration")
+		return
+	}
 	profileChanged := false
 	if req.LLMProfileID != nil { // key present (number or null)
 		var id *int64

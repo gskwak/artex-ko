@@ -786,8 +786,22 @@ CREATE TABLE IF NOT EXISTS agents (
     trigger_max_parallel INTEGER NOT NULL DEFAULT 5,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT agents_role_ck CHECK (role IN ('goals','main','planner','worker','assistant'))
+    CONSTRAINT agents_role_ck CHECK (role IN ('goals','main','planner','worker','assistant','blue_analyst'))
 );
+-- Existing installs have the earlier role CHECK. Expand it before seeding the
+-- dedicated read-only blue analyst, without dropping the constraint on every boot.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid='agents'::regclass AND conname='agents_role_ck'
+          AND pg_get_constraintdef(oid) NOT LIKE '%blue_analyst%'
+    ) THEN
+        ALTER TABLE agents DROP CONSTRAINT agents_role_ck;
+        ALTER TABLE agents ADD CONSTRAINT agents_role_ck
+            CHECK (role IN ('goals','main','planner','worker','assistant','blue_analyst'));
+    END IF;
+END $$;
 -- Column migration for existing databases. No CHECK to protect legacy data; the backend validates allowed values.
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS trigger_run_mode     TEXT    NOT NULL DEFAULT 'serial';
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS trigger_merge_mode   TEXT    NOT NULL DEFAULT 'all';
@@ -1384,3 +1398,147 @@ CREATE INDEX IF NOT EXISTS idx_notification_deliveries_batch
     ON notification_deliveries(batch_id) WHERE batch_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_notification_deliveries_channel
     ON notification_deliveries(channel_id, id DESC);
+
+-- =====================================================================
+-- Blue-team investigations
+--
+-- These records are deliberately independent from red-team explorations and
+-- vulnerability findings. Evidence is preserved even when a rule is disabled or
+-- an alert is resolved. Response actions record decisions only; no SQL trigger
+-- or approval transition executes an external action.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS blue_cases (
+    id             BIGSERIAL PRIMARY KEY,
+    title          TEXT NOT NULL,
+    description    TEXT NOT NULL DEFAULT '',
+    status         TEXT NOT NULL DEFAULT 'open'
+                   CHECK (status IN ('open','investigating','contained','resolved','closed')),
+    severity       TEXT NOT NULL DEFAULT 'medium'
+                   CHECK (severity IN ('info','low','medium','high','critical')),
+    summary        TEXT NOT NULL DEFAULT '',
+    red_finding_id BIGINT REFERENCES findings(id) ON DELETE SET NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_blue_cases_status ON blue_cases(status, updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_blue_cases_red_finding
+    ON blue_cases(red_finding_id) WHERE red_finding_id IS NOT NULL;
+DROP TRIGGER IF EXISTS trg_blue_cases_upd ON blue_cases;
+CREATE TRIGGER trg_blue_cases_upd BEFORE UPDATE ON blue_cases
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS blue_events (
+    id          BIGSERIAL PRIMARY KEY,
+    case_id     BIGINT REFERENCES blue_cases(id) ON DELETE SET NULL,
+    source      TEXT NOT NULL,
+    external_id TEXT,
+    event_type  TEXT NOT NULL DEFAULT '',
+    severity    TEXT NOT NULL DEFAULT 'info'
+                CHECK (severity IN ('info','low','medium','high','critical')),
+    asset       TEXT NOT NULL DEFAULT '',
+    message     TEXT NOT NULL DEFAULT '',
+    occurred_at TIMESTAMPTZ NOT NULL,
+    raw         JSONB NOT NULL DEFAULT '{}',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_blue_events_external ON blue_events(source, external_id)
+    WHERE external_id IS NOT NULL AND external_id <> '';
+CREATE INDEX IF NOT EXISTS idx_blue_events_case_time ON blue_events(case_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_blue_events_time ON blue_events(occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_blue_events_source_time ON blue_events(source, occurred_at DESC);
+
+CREATE TABLE IF NOT EXISTS blue_rules (
+    id          BIGSERIAL PRIMARY KEY,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    field       TEXT NOT NULL DEFAULT '',
+    operator    TEXT NOT NULL DEFAULT 'equals',
+    value       TEXT NOT NULL DEFAULT '',
+    definition  JSONB NOT NULL DEFAULT '{}',
+    severity    TEXT NOT NULL DEFAULT 'medium'
+                CHECK (severity IN ('info','low','medium','high','critical')),
+    enabled     BOOLEAN NOT NULL DEFAULT false,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+DROP TRIGGER IF EXISTS trg_blue_rules_upd ON blue_rules;
+CREATE TRIGGER trg_blue_rules_upd BEFORE UPDATE ON blue_rules
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS blue_alerts (
+    id         BIGSERIAL PRIMARY KEY,
+    rule_id    BIGINT NOT NULL REFERENCES blue_rules(id) ON DELETE CASCADE,
+    event_id   BIGINT NOT NULL REFERENCES blue_events(id) ON DELETE CASCADE,
+    case_id    BIGINT REFERENCES blue_cases(id) ON DELETE SET NULL,
+    title      TEXT NOT NULL,
+    severity   TEXT NOT NULL DEFAULT 'medium'
+               CHECK (severity IN ('info','low','medium','high','critical')),
+    status     TEXT NOT NULL DEFAULT 'new'
+               CHECK (status IN ('new','investigating','confirmed','false_positive','dismissed')),
+    reason     TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(rule_id,event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_blue_alerts_status ON blue_alerts(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_blue_alerts_case ON blue_alerts(case_id, created_at DESC);
+DROP TRIGGER IF EXISTS trg_blue_alerts_upd ON blue_alerts;
+CREATE TRIGGER trg_blue_alerts_upd BEFORE UPDATE ON blue_alerts
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS blue_observations (
+    id         BIGSERIAL PRIMARY KEY,
+    case_id    BIGINT NOT NULL REFERENCES blue_cases(id) ON DELETE CASCADE,
+    event_id   BIGINT REFERENCES blue_events(id) ON DELETE SET NULL,
+    alert_id   BIGINT REFERENCES blue_alerts(id) ON DELETE SET NULL,
+    evidence_event_ids JSONB NOT NULL DEFAULT '[]',
+    evidence_alert_ids JSONB NOT NULL DEFAULT '[]',
+    kind       TEXT NOT NULL DEFAULT 'fact'
+               CHECK (kind IN ('fact','hypothesis','unknown','recommendation','analysis')),
+    summary    TEXT NOT NULL,
+    detail     TEXT NOT NULL DEFAULT '',
+    assessment JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(assessment) = 'object'),
+    author     TEXT NOT NULL DEFAULT 'analyst',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE blue_observations ADD COLUMN IF NOT EXISTS assessment JSONB NOT NULL DEFAULT '{}'::jsonb;
+CREATE INDEX IF NOT EXISTS idx_blue_observations_case ON blue_observations(case_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS blue_actions (
+    id            BIGSERIAL PRIMARY KEY,
+    case_id       BIGINT NOT NULL REFERENCES blue_cases(id) ON DELETE CASCADE,
+    kind          TEXT NOT NULL,
+    target        TEXT NOT NULL,
+    rationale     TEXT NOT NULL DEFAULT '',
+    params        JSONB NOT NULL DEFAULT '{}',
+    status        TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending','approved','rejected','completed','failed')),
+    decision_note TEXT NOT NULL DEFAULT '',
+    requested_by  TEXT NOT NULL DEFAULT 'analyst',
+    decided_by    TEXT NOT NULL DEFAULT '',
+    completion_note TEXT NOT NULL DEFAULT '',
+    completion_evidence TEXT NOT NULL DEFAULT '',
+    completed_by TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    decided_at    TIMESTAMPTZ,
+    completed_at  TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_blue_actions_case ON blue_actions(case_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_blue_actions_pending ON blue_actions(created_at DESC)
+    WHERE status='pending';
+
+CREATE TABLE IF NOT EXISTS blue_analysis_runs (
+    id               BIGSERIAL PRIMARY KEY,
+    case_id          BIGINT NOT NULL REFERENCES blue_cases(id) ON DELETE CASCADE,
+    status           TEXT NOT NULL DEFAULT 'queued'
+                     CHECK (status IN ('queued','running','completed','failed')),
+    model_profile_id BIGINT REFERENCES llm_profiles(id) ON DELETE SET NULL,
+    observation_id   BIGINT REFERENCES blue_observations(id) ON DELETE SET NULL,
+    error            TEXT NOT NULL DEFAULT '',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at       TIMESTAMPTZ,
+    finished_at      TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_blue_analysis_runs_case ON blue_analysis_runs(case_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_blue_analysis_runs_active_case
+    ON blue_analysis_runs(case_id) WHERE status IN ('queued','running');

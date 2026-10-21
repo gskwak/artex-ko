@@ -92,6 +92,9 @@ export function AgentEditor({ agentKey, onSaved }: { agentKey: string; onSaved?:
   const [settings, setSettings] = React.useState<Settings | null>(null);
 
   React.useEffect(() => {
+    // The Blue Team analyst calls the LLM directly; it cannot use any host,
+    // MCP, skill, or shell tools, so their catalogs are irrelevant here.
+    if (agentKey === "blue_analyst") return;
     api
       .mcpServers()
       .then(setMcp)
@@ -116,7 +119,7 @@ export function AgentEditor({ agentKey, onSaved }: { agentKey: string; onSaved?:
       .catch(() => {
         /* 조회 실패는 무시하고 기본 상태를 유지한다 */
       });
-  }, []);
+  }, [agentKey]);
   // Global gates: traffic tools need traffic capture; web search needs the master switch.
   const captureOn = !!settings?.traffic_capture;
   const webSearchGlobalOn = !!settings?.web_search_enabled;
@@ -301,33 +304,44 @@ export function AgentEditor({ agentKey, onSaved }: { agentKey: string; onSaved?:
   if (loaded && !detail) {
     return <div className="text-muted-foreground p-6 text-center text-sm">{tr("notFound", { key: agentKey })}</div>;
   }
-  // config is meaningless for the conversational main agent and the fixed-budget
-  // goals decomposer; every other agent (workers, custom assistants) honors it.
-  const showConfig = agentKey !== "mainagent" && agentKey !== "goals";
+  // Blue analyst is a single direct LLM completion, with no SDK execution loop.
+  const isBlueAnalyst = agentKey === "blue_analyst" || detail?.agent?.role === "blue_analyst";
+  // config is meaningless for the conversational main agent, fixed-budget
+  // goals decomposer, and the direct-completion Blue analyst.
+  const showConfig = !isBlueAnalyst && agentKey !== "mainagent" && agentKey !== "goals";
   // web search applies to every conversational/executing agent except the one-shot
   // goals decomposer; it's gated by the global master switch.
-  const showWebSearch = agentKey !== "goals";
+  const showWebSearch = !isBlueAnalyst && agentKey !== "goals";
   // Interactive shell (persistent PTY tools) is available to every agent except goals, with no global gate.
-  const showInteractiveShell = agentKey !== "goals";
+  const showInteractiveShell = !isBlueAnalyst && agentKey !== "goals";
   // Every agent, including goals and mainagent, uses an LLM, so all agents can bind a default model.
   const showLLM = true;
   // triggers (P3) only attach to custom agents.
-  const isCustom = !!detail && !detail.agent?.builtin;
+  const isCustom = !!detail && !detail.agent?.builtin && !isBlueAnalyst;
 
   return (
-    <Tabs defaultValue="prompt" className="flex min-h-0 flex-1 flex-col">
+    <Tabs key={agentKey} defaultValue="prompt" className="flex min-h-0 flex-1 flex-col">
       <TabsList className="mx-4 mt-2 w-fit">
         <TabsTrigger value="prompt">{tr("tab.prompt")}</TabsTrigger>
-        <TabsTrigger value="wrapup">{tr("tab.wrapup")}</TabsTrigger>
-        <TabsTrigger value="mcp">MCP</TabsTrigger>
-        <TabsTrigger value="skill">Skill</TabsTrigger>
-        <TabsTrigger value="tools">Tools</TabsTrigger>
+        {!isBlueAnalyst && (
+          <>
+            <TabsTrigger value="wrapup">{tr("tab.wrapup")}</TabsTrigger>
+            <TabsTrigger value="mcp">MCP</TabsTrigger>
+            <TabsTrigger value="skill">Skill</TabsTrigger>
+            <TabsTrigger value="tools">Tools</TabsTrigger>
+          </>
+        )}
         {isCustom && <TabsTrigger value="triggers">{tr("tab.triggers")}</TabsTrigger>}
       </TabsList>
 
       {/* Config and prompt */}
       <TabsContent value="prompt" className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
         <div className="grid gap-4">
+          {isBlueAnalyst && (
+            <p className="rounded-md border border-blue-500/30 bg-blue-500/5 p-3 text-xs leading-relaxed text-muted-foreground">
+              {tr("blueAnalyst.description")}
+            </p>
+          )}
           {(showLLM || showConfig || showWebSearch || showInteractiveShell) && (
             <div className="grid gap-3 rounded-md border p-3">
               {showLLM && (
@@ -352,7 +366,9 @@ export function AgentEditor({ agentKey, onSaved }: { agentKey: string; onSaved?:
                         ))}
                       </SelectContent>
                     </Select>
-                    <span className="text-muted-foreground max-w-md text-xs">{tr("llm.hint")}</span>
+                    <span className="text-muted-foreground max-w-md text-xs">
+                      {isBlueAnalyst ? tr("blueAnalyst.modelHint") : tr("llm.hint")}
+                    </span>
                   </div>
                 </div>
               )}
@@ -614,73 +630,17 @@ export function AgentEditor({ agentKey, onSaved }: { agentKey: string; onSaved?:
         </div>
       </TabsContent>
 
-      {/* Wrap-up prompt */}
-      <TabsContent value="wrapup" className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        <div className="grid gap-3">
-          <p className="text-muted-foreground text-xs leading-relaxed">
-            {tr.rich("wrapup.desc", { b: (c) => <b>{c}</b> })}
-          </p>
-          <div className="flex items-center gap-2">
-            <Label className="text-xs">{tr("wrapup.bodyLabel")}</Label>
-            {wrapup.trim() ? (
-              <Badge variant="secondary" className="px-1.5 py-0">
-                {tr("wrapup.custom")}
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="px-1.5 py-0">
-                {tr("wrapup.useDefault")}
-              </Badge>
-            )}
-          </div>
-          <Textarea
-            className="font-mono text-xs"
-            rows={10}
-            value={wrapup}
-            placeholder={wrapupDefault || tr("wrapup.placeholder")}
-            onChange={(e) => setWrapup(e.target.value)}
-          />
-          <div className="grid gap-1.5">
-            <Label htmlFor="wrapup-turns" className="text-xs">
-              {tr("wrapup.turnsLabel", { default: wrapupTurnsDefault })}
-            </Label>
-            <Input
-              id="wrapup-turns"
-              type="number"
-              min={0}
-              className="h-8 w-32"
-              value={wrapupTurns}
-              onChange={(e) => setWrapupTurns(e.target.value)}
-            />
-          </div>
-          <div className="flex gap-2">
-            <Button size="sm" onClick={saveWrapup}>
-              {tr("wrapup.save")}
-            </Button>
-            <Button size="sm" variant="outline" onClick={resetWrapup}>
-              {tr("wrapup.resetDefault")}
-            </Button>
-          </div>
-          {wrapupDefault && (
-            <>
-              <Separator />
-              <div className="grid gap-1.5">
-                <Label className="text-muted-foreground text-xs">{tr("wrapup.defaultLabel")}</Label>
-                <pre className="text-muted-foreground max-h-40 overflow-y-auto rounded-md border bg-muted/30 p-2 text-xs whitespace-pre-wrap">
-                  {wrapupDefault}
-                </pre>
-              </div>
-            </>
-          )}
-
-          {ttSupported && (
-            <>
-              <Separator className="my-2" />
+      {!isBlueAnalyst && (
+        <>
+          {/* Wrap-up prompt */}
+          <TabsContent value="wrapup" className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+            <div className="grid gap-3">
               <p className="text-muted-foreground text-xs leading-relaxed">
-                {tr.rich("taskTimeout.desc", { b: (c) => <b>{c}</b> })}
+                {tr.rich("wrapup.desc", { b: (c) => <b>{c}</b> })}
               </p>
               <div className="flex items-center gap-2">
-                <Label className="text-xs">{tr("taskTimeout.bodyLabel")}</Label>
-                {ttWrapup.trim() ? (
+                <Label className="text-xs">{tr("wrapup.bodyLabel")}</Label>
+                {wrapup.trim() ? (
                   <Badge variant="secondary" className="px-1.5 py-0">
                     {tr("wrapup.custom")}
                   </Badge>
@@ -693,117 +653,179 @@ export function AgentEditor({ agentKey, onSaved }: { agentKey: string; onSaved?:
               <Textarea
                 className="font-mono text-xs"
                 rows={10}
-                value={ttWrapup}
-                placeholder={ttWrapupDefault || tr("taskTimeout.placeholder")}
-                onChange={(e) => setTtWrapup(e.target.value)}
+                value={wrapup}
+                placeholder={wrapupDefault || tr("wrapup.placeholder")}
+                onChange={(e) => setWrapup(e.target.value)}
               />
               <div className="grid gap-1.5">
-                <Label htmlFor="tt-turns" className="text-xs">
-                  {tr("taskTimeout.turnsLabel", { default: ttTurnsDefault })}
+                <Label htmlFor="wrapup-turns" className="text-xs">
+                  {tr("wrapup.turnsLabel", { default: wrapupTurnsDefault })}
                 </Label>
                 <Input
-                  id="tt-turns"
+                  id="wrapup-turns"
                   type="number"
                   min={0}
                   className="h-8 w-32"
-                  value={ttTurns}
-                  onChange={(e) => setTtTurns(e.target.value)}
+                  value={wrapupTurns}
+                  onChange={(e) => setWrapupTurns(e.target.value)}
                 />
               </div>
               <div className="flex gap-2">
-                <Button size="sm" onClick={saveTaskTimeoutWrapup}>
+                <Button size="sm" onClick={saveWrapup}>
                   {tr("wrapup.save")}
                 </Button>
-                <Button size="sm" variant="outline" onClick={resetTaskTimeoutWrapup}>
+                <Button size="sm" variant="outline" onClick={resetWrapup}>
                   {tr("wrapup.resetDefault")}
                 </Button>
               </div>
-              {ttWrapupDefault && (
-                <div className="grid gap-1.5">
-                  <Label className="text-muted-foreground text-xs">{tr("wrapup.defaultLabel")}</Label>
-                  <pre className="text-muted-foreground max-h-40 overflow-y-auto rounded-md border bg-muted/30 p-2 text-xs whitespace-pre-wrap">
-                    {ttWrapupDefault}
-                  </pre>
-                </div>
+              {wrapupDefault && (
+                <>
+                  <Separator />
+                  <div className="grid gap-1.5">
+                    <Label className="text-muted-foreground text-xs">{tr("wrapup.defaultLabel")}</Label>
+                    <pre className="text-muted-foreground max-h-40 overflow-y-auto rounded-md border bg-muted/30 p-2 text-xs whitespace-pre-wrap">
+                      {wrapupDefault}
+                    </pre>
+                  </div>
+                </>
               )}
-            </>
-          )}
-        </div>
-      </TabsContent>
 
-      {/* MCP visibility */}
-      <TabsContent value="mcp" className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        <p className="text-muted-foreground mb-3 text-xs">{tr("mcp.desc")}</p>
-        <div className="grid gap-2">
-          {mcp.map((m) => (
-            <label key={m.id} className="flex items-center gap-2 rounded-md border p-2 text-sm">
-              <Checkbox checked={mcpVisible.includes(m.id)} onCheckedChange={() => toggleMcp(m.id)} />
-              {m.name}
-              <span className="text-muted-foreground ml-auto text-xs">{m.transport}</span>
-            </label>
-          ))}
-          {mcp.length === 0 && <span className="text-muted-foreground text-xs">{tr("mcp.none")}</span>}
-        </div>
-      </TabsContent>
+              {ttSupported && (
+                <>
+                  <Separator className="my-2" />
+                  <p className="text-muted-foreground text-xs leading-relaxed">
+                    {tr.rich("taskTimeout.desc", { b: (c) => <b>{c}</b> })}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs">{tr("taskTimeout.bodyLabel")}</Label>
+                    {ttWrapup.trim() ? (
+                      <Badge variant="secondary" className="px-1.5 py-0">
+                        {tr("wrapup.custom")}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="px-1.5 py-0">
+                        {tr("wrapup.useDefault")}
+                      </Badge>
+                    )}
+                  </div>
+                  <Textarea
+                    className="font-mono text-xs"
+                    rows={10}
+                    value={ttWrapup}
+                    placeholder={ttWrapupDefault || tr("taskTimeout.placeholder")}
+                    onChange={(e) => setTtWrapup(e.target.value)}
+                  />
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="tt-turns" className="text-xs">
+                      {tr("taskTimeout.turnsLabel", { default: ttTurnsDefault })}
+                    </Label>
+                    <Input
+                      id="tt-turns"
+                      type="number"
+                      min={0}
+                      className="h-8 w-32"
+                      value={ttTurns}
+                      onChange={(e) => setTtTurns(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={saveTaskTimeoutWrapup}>
+                      {tr("wrapup.save")}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={resetTaskTimeoutWrapup}>
+                      {tr("wrapup.resetDefault")}
+                    </Button>
+                  </div>
+                  {ttWrapupDefault && (
+                    <div className="grid gap-1.5">
+                      <Label className="text-muted-foreground text-xs">{tr("wrapup.defaultLabel")}</Label>
+                      <pre className="text-muted-foreground max-h-40 overflow-y-auto rounded-md border bg-muted/30 p-2 text-xs whitespace-pre-wrap">
+                        {ttWrapupDefault}
+                      </pre>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </TabsContent>
 
-      {/* Skill visibility */}
-      <TabsContent value="skill" className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        <p className="text-muted-foreground mb-3 text-xs">{tr("skill.desc")}</p>
-        <div className="grid gap-2">
-          {skills.map((s) => (
-            <label key={s.name} className="flex items-center gap-2 rounded-md border p-2 text-sm">
-              <Checkbox checked={skillVisible.includes(s.name)} onCheckedChange={() => toggleSkill(s.name)} />
-              <span className="font-mono text-xs">{s.name}</span>
-              {s.description && <span className="text-muted-foreground ml-auto truncate text-xs">{s.description}</span>}
-            </label>
-          ))}
-          {skills.length === 0 && <span className="text-muted-foreground text-xs">{tr("skill.none")}</span>}
-        </div>
-      </TabsContent>
+          {/* MCP visibility */}
+          <TabsContent value="mcp" className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+            <p className="text-muted-foreground mb-3 text-xs">{tr("mcp.desc")}</p>
+            <div className="grid gap-2">
+              {mcp.map((m) => (
+                <label key={m.id} className="flex items-center gap-2 rounded-md border p-2 text-sm">
+                  <Checkbox checked={mcpVisible.includes(m.id)} onCheckedChange={() => toggleMcp(m.id)} />
+                  {m.name}
+                  <span className="text-muted-foreground ml-auto text-xs">{m.transport}</span>
+                </label>
+              ))}
+              {mcp.length === 0 && <span className="text-muted-foreground text-xs">{tr("mcp.none")}</span>}
+            </div>
+          </TabsContent>
 
-      {/* Tool bindings */}
-      <TabsContent value="tools" className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        <p className="text-muted-foreground mb-3 text-xs">{tr("tools.desc")}</p>
-        <div className="grid gap-2">
-          {tools.map((t) => {
-            const isTraffic = TRAFFIC_TOOL_KEYS.has(t.key);
-            const gated = isTraffic && !captureOn; // Traffic tools need traffic capture enabled.
-            return (
-              <label
-                key={t.key}
-                className={cn("flex items-center gap-2 rounded-md border p-2 text-sm", gated && "opacity-60")}
-              >
-                <Checkbox
-                  checked={t.agents.includes(agentKey)}
-                  disabled={gated}
-                  onCheckedChange={() => toggleTool(t)}
-                />
-                <span className="font-mono text-xs">{t.key}</span>
-                {isTraffic && (
-                  <Badge variant="secondary" className="px-1 py-0 text-[9px]">
-                    {tr("tools.trafficBadge")}
-                  </Badge>
-                )}
-                {!t.enabled && (
-                  <Badge variant="outline" className="text-destructive px-1 py-0 text-[9px]">
-                    {tr("tools.disabledBadge")}
-                  </Badge>
-                )}
-                {gated ? (
-                  <span className="text-muted-foreground ml-auto text-xs">{tr("tools.needCapture")}</span>
-                ) : (
-                  t.description && (
-                    <span className="text-muted-foreground ml-auto line-clamp-1 max-w-[55%] text-xs">
-                      {t.description}
-                    </span>
-                  )
-                )}
-              </label>
-            );
-          })}
-          {tools.length === 0 && <span className="text-muted-foreground text-xs">{tr("tools.none")}</span>}
-        </div>
-      </TabsContent>
+          {/* Skill visibility */}
+          <TabsContent value="skill" className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+            <p className="text-muted-foreground mb-3 text-xs">{tr("skill.desc")}</p>
+            <div className="grid gap-2">
+              {skills.map((s) => (
+                <label key={s.name} className="flex items-center gap-2 rounded-md border p-2 text-sm">
+                  <Checkbox checked={skillVisible.includes(s.name)} onCheckedChange={() => toggleSkill(s.name)} />
+                  <span className="font-mono text-xs">{s.name}</span>
+                  {s.description && (
+                    <span className="text-muted-foreground ml-auto truncate text-xs">{s.description}</span>
+                  )}
+                </label>
+              ))}
+              {skills.length === 0 && <span className="text-muted-foreground text-xs">{tr("skill.none")}</span>}
+            </div>
+          </TabsContent>
+
+          {/* Tool bindings */}
+          <TabsContent value="tools" className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+            <p className="text-muted-foreground mb-3 text-xs">{tr("tools.desc")}</p>
+            <div className="grid gap-2">
+              {tools.map((t) => {
+                const isTraffic = TRAFFIC_TOOL_KEYS.has(t.key);
+                const gated = isTraffic && !captureOn; // Traffic tools need traffic capture enabled.
+                return (
+                  <label
+                    key={t.key}
+                    className={cn("flex items-center gap-2 rounded-md border p-2 text-sm", gated && "opacity-60")}
+                  >
+                    <Checkbox
+                      checked={t.agents.includes(agentKey)}
+                      disabled={gated}
+                      onCheckedChange={() => toggleTool(t)}
+                    />
+                    <span className="font-mono text-xs">{t.key}</span>
+                    {isTraffic && (
+                      <Badge variant="secondary" className="px-1 py-0 text-[9px]">
+                        {tr("tools.trafficBadge")}
+                      </Badge>
+                    )}
+                    {!t.enabled && (
+                      <Badge variant="outline" className="text-destructive px-1 py-0 text-[9px]">
+                        {tr("tools.disabledBadge")}
+                      </Badge>
+                    )}
+                    {gated ? (
+                      <span className="text-muted-foreground ml-auto text-xs">{tr("tools.needCapture")}</span>
+                    ) : (
+                      t.description && (
+                        <span className="text-muted-foreground ml-auto line-clamp-1 max-w-[55%] text-xs">
+                          {t.description}
+                        </span>
+                      )
+                    )}
+                  </label>
+                );
+              })}
+              {tools.length === 0 && <span className="text-muted-foreground text-xs">{tr("tools.none")}</span>}
+            </div>
+          </TabsContent>
+        </>
+      )}
 
       {/* Triggers (P3, custom agents only) */}
       {isCustom && (

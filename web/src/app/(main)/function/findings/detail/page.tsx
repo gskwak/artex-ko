@@ -3,10 +3,10 @@
 import * as React from "react";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
-import { ArrowLeftIcon, ArrowUpRightIcon, ShieldAlertIcon } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { ArrowLeftIcon, ArrowUpRightIcon, Loader2Icon, ShieldAlertIcon, ShieldCheckIcon } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { CopyButton } from "@/components/copy-button";
@@ -22,7 +22,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { api } from "@/lib/api";
+import { api, http } from "@/lib/api";
 import type { Finding, FindingStatus, Severity } from "@/lib/types";
 
 import { FindingLineageView } from "./lineage";
@@ -40,6 +40,37 @@ const FINDING_STATUSES: FindingStatus[] = [
   "risk_accepted",
 ];
 
+const BLUE_CASE_COPY = {
+  ko: {
+    create: "블루팀 케이스 만들기",
+    creating: "케이스 생성 중…",
+    created: "블루팀 케이스를 열었습니다.",
+    failed: "블루팀 케이스를 만들지 못했습니다",
+    requiresConfirmed: "상태를 '확인됨'으로 변경한 취약점만 전달할 수 있습니다.",
+  },
+  en: {
+    create: "Create Blue Team case",
+    creating: "Creating case…",
+    created: "Blue Team case opened.",
+    failed: "Could not create the Blue Team case",
+    requiresConfirmed: "Confirm this finding before sending it to Blue Team.",
+  },
+  zh: {
+    create: "创建蓝队事件",
+    creating: "正在创建事件…",
+    created: "已打开蓝队事件。",
+    failed: "无法创建蓝队事件",
+    requiresConfirmed: "请先将漏洞状态设为“已确认”。",
+  },
+  es: {
+    create: "Crear caso del equipo azul",
+    creating: "Creando caso…",
+    created: "Se abrió el caso del equipo azul.",
+    failed: "No se pudo crear el caso del equipo azul",
+    requiresConfirmed: "Confirma este hallazgo antes de enviarlo al equipo azul.",
+  },
+} as const;
+
 function fmtTime(ts: string) {
   return new Date(ts).toLocaleString("ko-KR");
 }
@@ -56,11 +87,15 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
 
 function FindingDetailInner() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const id = searchParams.get("id") ?? "";
   const contextTaskId = searchParams.get("context_task") ?? "";
   const [finding, setFinding] = React.useState<Finding | null>(null);
   const [loaded, setLoaded] = React.useState(false);
+  const [creatingBlueCase, setCreatingBlueCase] = React.useState(false);
   const [tab, setTab] = React.useState("overview");
+  const locale = useLocale();
+  const blueCopy = BLUE_CASE_COPY[locale as keyof typeof BLUE_CASE_COPY] ?? BLUE_CASE_COPY.en;
   const t = useTranslations("findings");
   const tStatus = useTranslations("status");
 
@@ -113,6 +148,23 @@ function FindingDetailInner() {
     [finding, id, t, tStatus],
   );
 
+  const createBlueCase = React.useCallback(async () => {
+    const findingID = finding?.finding_id;
+    if (!findingID || finding.status !== "confirmed" || creatingBlueCase) return;
+    setCreatingBlueCase(true);
+    try {
+      const blueCase = await http<{ id: number | string }>("/blue/cases/from-finding", {
+        method: "POST",
+        body: JSON.stringify({ finding_id: Number(findingID) }),
+      });
+      toast.success(blueCopy.created);
+      router.push(`/blue/cases/detail?id=${encodeURIComponent(String(blueCase.id))}`);
+    } catch (error) {
+      toast.error(`${blueCopy.failed}: ${(error as Error).message}`);
+      setCreatingBlueCase(false);
+    }
+  }, [blueCopy, creatingBlueCase, finding, router]);
+
   if (!finding) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-10 text-center">
@@ -152,6 +204,21 @@ function FindingDetailInner() {
           {finding.inherited && finding.source_task_id && (
             <Badge variant="outline">{t("detail.sourceTask", { id: finding.source_task_id })}</Badge>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto h-8"
+            disabled={creatingBlueCase || !finding.finding_id || finding.status !== "confirmed"}
+            title={finding.status === "confirmed" ? blueCopy.create : blueCopy.requiresConfirmed}
+            onClick={() => void createBlueCase()}
+          >
+            {creatingBlueCase ? (
+              <Loader2Icon className="size-4 animate-spin" />
+            ) : (
+              <ShieldCheckIcon className="size-4" />
+            )}
+            {creatingBlueCase ? blueCopy.creating : blueCopy.create}
+          </Button>
         </div>
         <TabsList>
           <TabsTrigger value="overview">{t("detail.tab.overview")}</TabsTrigger>

@@ -18,8 +18,8 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
-import type { NavMainItem } from "@/navigation/sidebar/sidebar-items";
-import { sidebarItems } from "@/navigation/sidebar/sidebar-items";
+import { useTeamMode } from "@/hooks/use-team-mode";
+import { blueSidebarItems, type NavGroup, type NavMainItem, redSidebarItems } from "@/navigation/sidebar/sidebar-items";
 
 // 표시 문자열은 데이터에 담지 않고 nav 네임스페이스 키만 담아 둔다. 실제 라벨·헤딩은
 // 컴포넌트에서 useTranslations("nav") 로 렌더 시점에 번역한다(사이드바와 같은 메시지 원천).
@@ -35,47 +35,47 @@ type SearchItem = {
 };
 
 // 그룹 번호 → nav.group.* 키. nav-main 과 같은 매핑을 쓴다.
-const GROUP_MESSAGE_KEY: Record<number, string> = { 1: "function", 2: "system" };
+const GROUP_MESSAGE_KEY: Record<number, string> = { 1: "function", 2: "system", 3: "blue" };
 function groupHeadingKey(groupId: number): string {
   const k = GROUP_MESSAGE_KEY[groupId];
   return k ? `group.${k}` : `group.${groupId}`;
 }
 
-const searchItems: SearchItem[] = sidebarItems.flatMap((group) => {
-  const headingKey = groupHeadingKey(group.id);
-  return group.items.flatMap((item) => {
-    if (item.subItems) {
-      return item.subItems.map((sub) => ({
-        id: sub.id,
-        headingKey,
-        labelKey: `item.${sub.id}`,
-        fallbackLabel: sub.title,
-        url: sub.url,
-        icon: item.icon,
-        disabled: sub.disabled,
-        newTab: sub.newTab,
-      }));
-    }
-    return [
-      {
-        id: item.id,
-        headingKey,
-        labelKey: `item.${item.id}`,
-        fallbackLabel: item.title,
-        url: item.url,
-        icon: item.icon,
-        disabled: item.disabled,
-        newTab: item.newTab,
-      },
-    ];
+function searchItemsFor(groups: readonly NavGroup[]): SearchItem[] {
+  return groups.flatMap((group) => {
+    const headingKey = groupHeadingKey(group.id);
+    return group.items.flatMap((item) => {
+      if (item.subItems) {
+        return item.subItems.map((sub) => ({
+          id: sub.id,
+          headingKey,
+          labelKey: `item.${sub.id}`,
+          fallbackLabel: sub.title,
+          url: sub.url,
+          icon: item.icon,
+          disabled: sub.disabled,
+          newTab: sub.newTab,
+        }));
+      }
+      return [
+        {
+          id: item.id,
+          headingKey,
+          labelKey: `item.${item.id}`,
+          fallbackLabel: item.title,
+          url: item.url,
+          icon: item.icon,
+          disabled: item.disabled,
+          newTab: item.newTab,
+        },
+      ];
+    });
   });
-});
+}
 
 function getAvailableItems(items: SearchItem[]) {
   return items.filter((item) => !item.disabled && !item.url.includes("coming-soon"));
 }
-
-const recommendations = getAvailableItems(searchItems);
 
 function groupBy(items: SearchItem[]) {
   const headings = [...new Set(items.map((item) => item.headingKey))];
@@ -91,6 +91,9 @@ export function SearchDialog() {
   const router = useRouter();
   const t = useTranslations("search");
   const tNav = useTranslations("nav");
+  const { mode } = useTeamMode();
+  const searchItems = searchItemsFor(mode === "blue" ? blueSidebarItems : redSidebarItems);
+  const recommendations = getAvailableItems(searchItems);
   const labelOf = (item: SearchItem) => (tNav.has(item.labelKey) ? tNav(item.labelKey) : item.fallbackLabel);
 
   React.useEffect(() => {

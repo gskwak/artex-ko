@@ -31,7 +31,11 @@ export function mentionSearch(query: string) {
   const text = query.trimStart().toLowerCase();
   for (const item of mentionKinds) {
     for (const alias of [item.label.toLowerCase(), item.alias, item.legacyLabel.toLowerCase()]) {
-      if (text === alias || text.startsWith(`${alias} `) || (/[^\x00-\x7F]/.test(alias) && text.startsWith(alias))) {
+      if (
+        text === alias ||
+        text.startsWith(`${alias} `) ||
+        (Array.from(alias).some((character) => character.charCodeAt(0) > 127) && text.startsWith(alias))
+      ) {
         return { kind: item.kind, query: query.trimStart().slice(alias.length).trim(), categories: [] };
       }
     }
@@ -65,13 +69,15 @@ export interface SelectedMention {
 // New tokens use English labels. Keep parsing legacy Chinese labels from saved drafts and chat history.
 // The consumer uses mentionTextarea.kind to localize the selected chips.
 export function selectedMentions(value: string): SelectedMention[] {
-  return [...value.matchAll(/@\[(finding|asset|company|endpoint|IP|application|root domain|subdomain|service|漏洞|资产|企业|接口|应用|域名|子域名|服务)#([0-9]+)(?: ([^\]\r\n]*))?\]/g)].map(
-    (match) => ({
-      token: match[0],
-      kind: mentionKinds.find((entry) => entry.label === match[1] || entry.legacyLabel === match[1])?.kind ?? "asset",
-      id: match[2],
-      text: match[3] ?? "",
-      start: match.index,
-    }),
-  );
+  return [
+    ...value.matchAll(
+      /@\[(finding|asset|company|endpoint|IP|application|root domain|subdomain|service|漏洞|资产|企业|接口|应用|域名|子域名|服务)#([0-9]+)(?: ([^\]\r\n]*))?\]/g,
+    ),
+  ].map((match) => ({
+    token: match[0],
+    kind: mentionKinds.find((entry) => entry.label === match[1] || entry.legacyLabel === match[1])?.kind ?? "asset",
+    id: match[2],
+    text: match[3] ?? "",
+    start: match.index,
+  }));
 }

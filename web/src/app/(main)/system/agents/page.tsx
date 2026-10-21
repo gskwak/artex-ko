@@ -41,6 +41,7 @@ import type { Agent } from "@/lib/types";
 // (non-builtin) agents get a delete button.
 function AgentGridCard({ agent, onOpen, onDeleted }: { agent: Agent; onOpen: () => void; onDeleted: () => void }) {
   const t = useTranslations("agentsPage");
+  const isBlueAnalyst = agent.role === "blue_analyst" || agent.key === "blue_analyst";
   async function del() {
     try {
       await api.deleteAgent(agent.key);
@@ -57,6 +58,14 @@ function AgentGridCard({ agent, onOpen, onDeleted }: { agent: Agent; onOpen: () 
           <Bot className="text-muted-foreground size-4" />
           <span className="text-sm font-medium">{agent.name}</span>
           <span className="text-muted-foreground font-mono text-xs">{agent.key}</span>
+          {isBlueAnalyst && (
+            <Badge
+              variant="outline"
+              className="border-blue-500/40 bg-blue-500/10 px-1.5 py-0 text-[10px] text-blue-700 dark:text-blue-300"
+            >
+              {t("badgeBlueAnalyst")}
+            </Badge>
+          )}
           {agent.builtin ? (
             <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
               {t("badgeBuiltin")}
@@ -74,13 +83,15 @@ function AgentGridCard({ agent, onOpen, onDeleted }: { agent: Agent; onOpen: () 
         </div>
         {/* biome-ignore lint/nursery/useNullishCoalescing: 설명 폴백 — 빈 설명도 안내 문구로 대체해야 하므로 || 가 의도된 동작이다(?? 는 빈 문자열을 그대로 노출한다) */}
         <p className="text-muted-foreground line-clamp-2 min-h-8 text-xs">{agent.description || t("noDescription")}</p>
-        <div className="text-muted-foreground flex flex-wrap gap-1.5 text-[10px]">
-          <span className="rounded border px-1.5 py-0.5">MCP {agent.mcp_count ?? 0}</span>
-          <span className="rounded border px-1.5 py-0.5">Skill {agent.skill_count ?? 0}</span>
-          <span className="rounded border px-1.5 py-0.5">
-            {t("toolLabel")} {agent.tool_count ?? 0}
-          </span>
-        </div>
+        {!isBlueAnalyst && (
+          <div className="text-muted-foreground flex flex-wrap gap-1.5 text-[10px]">
+            <span className="rounded border px-1.5 py-0.5">MCP {agent.mcp_count ?? 0}</span>
+            <span className="rounded border px-1.5 py-0.5">Skill {agent.skill_count ?? 0}</span>
+            <span className="rounded border px-1.5 py-0.5">
+              {t("toolLabel")} {agent.tool_count ?? 0}
+            </span>
+          </div>
+        )}
       </button>
       {!agent.builtin && (
         <AlertDialog>
@@ -252,13 +263,25 @@ export default function AgentsPage() {
                 <SheetTitle className="flex items-center gap-2">
                   {editing.name}
                   <span className="text-muted-foreground font-mono text-xs">{editing.key}</span>
+                  {(editing.role === "blue_analyst" || editing.key === "blue_analyst") && (
+                    <Badge
+                      variant="outline"
+                      className="border-blue-500/40 bg-blue-500/10 px-1.5 py-0 text-[10px] text-blue-700 dark:text-blue-300"
+                    >
+                      {t("badgeBlueAnalyst")}
+                    </Badge>
+                  )}
                   {!editing.builtin && (
                     <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
                       {t("badgeCustom")}
                     </Badge>
                   )}
                 </SheetTitle>
-                <SheetDescription>{editing.description || t("editorDescFallback")}</SheetDescription>
+                <SheetDescription>
+                  {editing.role === "blue_analyst" || editing.key === "blue_analyst"
+                    ? t("blueAnalystDescription")
+                    : editing.description || t("editorDescFallback")}
+                </SheetDescription>
               </SheetHeader>
               <AgentEditor agentKey={editing.key} onSaved={reload} />
             </>
