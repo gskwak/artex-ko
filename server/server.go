@@ -157,6 +157,11 @@ type Server struct {
 	// trigger queue — the drain goroutine simply proceeds to the next queued fire.
 	chatCancel map[string]context.CancelCauseFunc
 
+	// blueAnalysisCancel tracks bounded case/task analyst completions so a task
+	// can stop its own in-flight model call without affecting other analyses.
+	blueAnalysisMu     sync.Mutex
+	blueAnalysisCancel map[int64]context.CancelFunc
+
 	// triggerQ buffers P3 trigger fires PER AGENT. A per-agent "pump" launches runs up
 	// to a concurrency limit derived from the agent's strategy: serial → limit 1 (+ optional
 	// merge); parallel → limit = trigger_max_parallel (0=∞), no merge. triggerActive
@@ -911,6 +916,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/commands", s.pgListCommands)
 	mux.HandleFunc("GET /api/commands/stats", s.pgToolStats) // Aggregate invocation counts by tool.
 	mux.HandleFunc("GET /api/llm/records", s.pgListLLMRecords)
+	mux.HandleFunc("GET /api/blue/llm/records", s.blueListLLMRecords)
+	mux.HandleFunc("GET /api/blue/llm/records/{id}", s.blueGetLLMRecord)
 	mux.HandleFunc("DELETE /api/llm/records", s.pgDeleteLLMRecords)
 	mux.HandleFunc("GET /api/llm/records/tasks", s.pgLLMTasks)
 	mux.HandleFunc("GET /api/llm/records/by-model", s.pgTokenByModel) // Aggregate this task's token use by model.

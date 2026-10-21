@@ -13,11 +13,7 @@ const MATCHED_SECTIONS: ReadonlyArray<readonly [red: string, blue: string]> = [
   ["tasks", "tasks"],
   ["findings", "cases"],
   ["traffic", "traffic"],
-  ["commands", "commands"],
   ["llm-records", "llm-records"],
-  ["assets", "assets"],
-  ["sync", "sync"],
-  ["workspace", "workspace"],
 ];
 
 export const teamLandingRoute: Record<TeamMode, string> = {

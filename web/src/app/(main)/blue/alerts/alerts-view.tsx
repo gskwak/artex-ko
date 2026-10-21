@@ -14,14 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import type { Locale } from "@/i18n/config";
 import { useActiveLocale } from "@/i18n/locale-store";
-import {
-  type BlueAlert,
-  type BlueAlertStatus,
-  type BlueCase,
-  type BlueSeverity,
-  blueApi,
-  blueRequest,
-} from "@/lib/blue-api";
+import { type BlueAlert, type BlueAlertStatus, type BlueCase, type BlueSeverity, blueApi } from "@/lib/blue-api";
 import { blueAlertStatusLabel, blueCaseStatusLabel, blueSeverityLabel, useBlueCopy } from "@/lib/blue-copy";
 
 import {
@@ -70,6 +63,7 @@ export default function BlueAlertsView({ embedded = false }: { embedded?: boolea
   const [statusFilter, setStatusFilter] = React.useState<BlueAlertStatus | "all">("all");
   const [severityFilter, setSeverityFilter] = React.useState<BlueSeverity | "all">("all");
   const [search, setSearch] = React.useState("");
+  const [query, setQuery] = React.useState("");
   const [selectedID, setSelectedID] = React.useState<number | null>(null);
   const [draftStatus, setDraftStatus] = React.useState<BlueAlertStatus>("new");
   const [draftReason, setDraftReason] = React.useState("");
@@ -83,30 +77,52 @@ export default function BlueAlertsView({ embedded = false }: { embedded?: boolea
   const [nextOffset, setNextOffset] = React.useState(0);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState("");
+  const requestSequence = React.useRef(0);
+
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => setQuery(search.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   const load = React.useCallback(async () => {
+    const sequence = ++requestSequence.current;
     setLoading(true);
+    setLoadingMore(false);
+    setAlerts([]);
+    setHasMore(false);
+    setNextOffset(0);
     setError("");
     try {
-      const [nextAlerts, nextCases] = await Promise.all([
+      const [result, nextCases] = await Promise.all([
         blueApi.alerts({
+          q: query,
           status: statusFilter === "all" ? undefined : statusFilter,
           severity: severityFilter === "all" ? undefined : severityFilter,
-          limit: PAGE_SIZE,
+          limit: PAGE_SIZE + 1,
         }),
         blueApi.cases({ limit: 100 }),
       ]);
-      setHasMore(nextAlerts.length === PAGE_SIZE);
+      if (sequence !== requestSequence.current) return;
+      const nextAlerts = result.slice(0, PAGE_SIZE);
+      setHasMore(result.length > PAGE_SIZE);
       setNextOffset(nextAlerts.length);
       setCases(nextCases);
       const linkedID = Number(new URLSearchParams(window.location.search).get("alert"));
-      if (Number.isSafeInteger(linkedID) && linkedID > 0 && !nextAlerts.some((item) => item.id === linkedID)) {
+      if (
+        !query &&
+        statusFilter === "all" &&
+        severityFilter === "all" &&
+        Number.isSafeInteger(linkedID) &&
+        linkedID > 0 &&
+        !nextAlerts.some((item) => item.id === linkedID)
+      ) {
         try {
           nextAlerts.unshift(await blueApi.getAlert(linkedID));
         } catch (cause) {
-          setError(cause instanceof Error ? cause.message : copy.loadFailed);
+          if (sequence === requestSequence.current) setError(cause instanceof Error ? cause.message : copy.loadFailed);
         }
       }
+      if (sequence !== requestSequence.current) return;
       setAlerts(nextAlerts);
       setSelectedID((current) => {
         if (current && nextAlerts.some((item) => item.id === current)) return current;
@@ -114,11 +130,11 @@ export default function BlueAlertsView({ embedded = false }: { embedded?: boolea
         return nextAlerts[0]?.id ?? null;
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : copy.loadFailed);
+      if (sequence === requestSequence.current) setError(cause instanceof Error ? cause.message : copy.loadFailed);
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
-  }, [copy.loadFailed, severityFilter, statusFilter]);
+  }, [copy.loadFailed, query, severityFilter, statusFilter]);
 
   React.useEffect(() => {
     void load();
@@ -164,30 +180,28 @@ export default function BlueAlertsView({ embedded = false }: { embedded?: boolea
     };
   }, [copy.loadFailed, draftCaseID, locale]);
 
-  const filtered = alerts.filter((item) => {
-    const term = search.trim().toLowerCase();
-    if (!term) return true;
-    return (
-      String(item.id).includes(term) || item.title.toLowerCase().includes(term) || String(item.event_id).includes(term)
-    );
-  });
-
   async function loadMore() {
-    if (loadingMore || !hasMore) return;
+    if (loading || loadingMore || !hasMore) return;
+    const sequence = requestSequence.current;
     setLoadingMore(true);
     try {
-      const query = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(nextOffset) });
-      if (statusFilter !== "all") query.set("status", statusFilter);
-      if (severityFilter !== "all") query.set("severity", severityFilter);
-      const next = await blueRequest<BlueAlert[]>(`/alerts?${query.toString()}`);
+      const result = await blueApi.alerts({
+        q: query,
+        status: statusFilter === "all" ? undefined : statusFilter,
+        severity: severityFilter === "all" ? undefined : severityFilter,
+        limit: PAGE_SIZE + 1,
+        offset: nextOffset,
+      });
+      if (sequence !== requestSequence.current) return;
+      const next = result.slice(0, PAGE_SIZE);
       setAlerts((current) => {
         const known = new Set(current.map((item) => item.id));
         return [...current, ...next.filter((item) => !known.has(item.id))];
       });
       setNextOffset(nextOffset + next.length);
-      setHasMore(next.length === PAGE_SIZE);
+      setHasMore(result.length > PAGE_SIZE);
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : copy.loadFailed);
+      if (sequence === requestSequence.current) toast.error(cause instanceof Error ? cause.message : copy.loadFailed);
     } finally {
       setLoadingMore(false);
     }
@@ -222,7 +236,7 @@ export default function BlueAlertsView({ embedded = false }: { embedded?: boolea
         }),
       );
       toast.success(copy.alertUpdated);
-      if (statusFilter !== "all" && updated.status !== statusFilter) void load();
+      void load();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : copy.saveFailed);
       if (moved) void load();
@@ -298,9 +312,9 @@ export default function BlueAlertsView({ embedded = false }: { embedded?: boolea
 
       {error && <BlueError message={error} retry={() => void load()} retryLabel={copy.refresh} />}
       {loading && alerts.length === 0 ? <BlueLoading label={copy.loading} /> : null}
-      {!loading && filtered.length === 0 ? <BlueEmpty message={copy.noAlerts} /> : null}
+      {!loading && alerts.length === 0 ? <BlueEmpty message={copy.noAlerts} /> : null}
 
-      {filtered.length > 0 && (
+      {alerts.length > 0 && (
         <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(310px,1fr)]">
           <Card className="min-w-0">
             <CardContent className="p-0">
@@ -314,7 +328,7 @@ export default function BlueAlertsView({ embedded = false }: { embedded?: boolea
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map((item) => (
+                  {alerts.map((item) => (
                     <TableRow key={item.id} data-state={selectedID === item.id ? "selected" : undefined}>
                       <TableCell className="min-w-52 whitespace-normal">
                         <button

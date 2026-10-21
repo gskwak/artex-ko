@@ -13,6 +13,8 @@ import (
 
 const validReply = `{"summary":"One login sequence needs investigation.","verdict":"inconclusive","confidence":"medium","severity":"unknown","facts":[{"text":"A failed login was recorded.","evidence":[{"kind":"event","id":11}]}],"hypotheses":[{"text":"The alert may indicate credential abuse.","evidence":[{"kind":"alert","id":22}]}],"unknowns":["No endpoint telemetry was supplied."],"detection_ideas":[{"text":"Review repeated failures per account.","evidence":[{"kind":"event","id":11}]}],"response_recommendations":[{"text":"Ask the owner to review the account.","evidence":[{"kind":"alert","id":22}]}]}`
 
+const taskReply = `{"summary":"A login failure was recorded.","verdict":"inconclusive","confidence":"medium","severity":"unknown","facts":[{"text":"A failed login was recorded.","evidence":[{"kind":"event","id":11}]}],"hypotheses":[],"unknowns":["The sign-in origin was not supplied."],"detection_ideas":[],"response_recommendations":[],"task_outcome":{"status":"answered","summary":"The requested authentication review found one failed login; the origin is unknown.","evidence":[{"kind":"event","id":11}]}}`
+
 func fixture() Input {
 	return Input{
 		CaseID: 1, Title: "Suspicious sign-in", Status: "open", Severity: "medium",
@@ -142,5 +144,56 @@ func TestAnalyzeNeedsEvidence(t *testing.T) {
 	p := &captureProvider{output: validReply}
 	if _, err := Analyze(t.Context(), p, Input{CaseID: 1}, 0); err == nil {
 		t.Fatal("empty case should not call model")
+	}
+}
+
+func TestTaskAnalysisCarriesBoundedFocusAndRequiresOutcome(t *testing.T) {
+	in := fixture()
+	in.Task = &Task{ID: 7, Title: "Review authentication evidence", Description: strings.Repeat("context ", 1000), Priority: "critical"}
+	p := &captureProvider{output: taskReply}
+	a, err := Analyze(t.Context(), p, in, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.TaskOutcome == nil || a.TaskOutcome.Status != "answered" || !strings.Contains(a.Markdown(), "requested authentication review") {
+		t.Fatalf("task-specific outcome was not returned: %+v", a.TaskOutcome)
+	}
+	if len(p.request.System) != 3 || p.request.System[2] != TaskRuntimeContract || len(p.request.Tools) != 0 {
+		t.Fatalf("task analysis missed the read-only contract: %+v", p.request)
+	}
+	var supplied Input
+	if err := json.Unmarshal([]byte(p.request.Messages[0].Content[0].Text), &supplied); err != nil {
+		t.Fatal(err)
+	}
+	if supplied.Task == nil || supplied.Task.ID != 7 || supplied.Task.Title != in.Task.Title || supplied.Task.Priority != "critical" ||
+		len([]rune(supplied.Task.Description)) > maxFieldRunes+20 {
+		t.Fatalf("task focus or bounds were lost: %+v", supplied.Task)
+	}
+	p.output = validReply
+	if _, err := Analyze(t.Context(), p, in, 0); err == nil || !strings.Contains(err.Error(), "task outcome") {
+		t.Fatalf("accepted a generic case response for a task: %v", err)
+	}
+}
+
+func TestTaskOutcomeMustBeExplicitAndCited(t *testing.T) {
+	in := fixture()
+	in.Task = &Task{ID: 7, Title: "Review authentication evidence"}
+	for _, reply := range []string{
+		strings.Replace(taskReply, `"status":"answered"`, `"status":"done"`, 1),
+		strings.Replace(taskReply, `"evidence":[{"kind":"event","id":11}]}}`, `"evidence":[]}}`, 1),
+		strings.Replace(taskReply, `"evidence":[{"kind":"event","id":11}]}}`, `"evidence":[{"kind":"event","id":999}]}}`, 1),
+	} {
+		if _, err := Parse(reply, in); err == nil {
+			t.Fatalf("accepted invalid task outcome: %s", reply)
+		}
+	}
+	insufficient := strings.Replace(taskReply,
+		`"status":"answered","summary":"The requested authentication review found one failed login; the origin is unknown."`,
+		`"status":"insufficient_evidence","summary":"The source IP was not included in the supplied records."`, 1)
+	if _, err := Parse(insufficient, in); err != nil {
+		t.Fatalf("rejected explicit inability to answer: %v", err)
+	}
+	if _, err := Parse(taskReply, fixture()); err == nil {
+		t.Fatal("accepted a task outcome in a generic case analysis")
 	}
 }

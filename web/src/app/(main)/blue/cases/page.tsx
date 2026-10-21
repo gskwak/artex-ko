@@ -50,6 +50,7 @@ export default function BlueCasesPage() {
   const [nextOffset, setNextOffset] = React.useState(0);
   const [error, setError] = React.useState("");
   const [search, setSearch] = React.useState("");
+  const [query, setQuery] = React.useState("");
   const [status, setStatus] = React.useState<BlueCaseStatus | "all">("all");
   const [severity, setSeverity] = React.useState<BlueSeverity | "all">("all");
   const [createOpen, setCreateOpen] = React.useState(false);
@@ -57,21 +58,38 @@ export default function BlueCasesPage() {
   const [title, setTitle] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [newSeverity, setNewSeverity] = React.useState<BlueSeverity>("medium");
+  const loadVersion = React.useRef(0);
+
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => setQuery(search.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   const load = React.useCallback(async () => {
+    const version = ++loadVersion.current;
     setLoading(true);
+    setLoadingMore(false);
+    setCases([]);
+    setHasMore(false);
+    setNextOffset(0);
     setError("");
     try {
-      const page = await blueApi.cases({ limit: PAGE_SIZE + 1 });
+      const page = await blueApi.cases({
+        q: query,
+        status: status === "all" ? undefined : status,
+        severity: severity === "all" ? undefined : severity,
+        limit: PAGE_SIZE + 1,
+      });
+      if (version !== loadVersion.current) return;
       setCases(page.slice(0, PAGE_SIZE));
       setHasMore(page.length > PAGE_SIZE);
       setNextOffset(Math.min(page.length, PAGE_SIZE));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : copy.loadFailed);
+      if (version === loadVersion.current) setError(cause instanceof Error ? cause.message : copy.loadFailed);
     } finally {
-      setLoading(false);
+      if (version === loadVersion.current) setLoading(false);
     }
-  }, [copy.loadFailed]);
+  }, [copy.loadFailed, query, severity, status]);
 
   React.useEffect(() => {
     void load();
@@ -79,9 +97,17 @@ export default function BlueCasesPage() {
 
   async function loadMore() {
     if (loadingMore || !hasMore) return;
+    const version = loadVersion.current;
     setLoadingMore(true);
     try {
-      const page = await blueApi.cases({ limit: PAGE_SIZE + 1, offset: nextOffset });
+      const page = await blueApi.cases({
+        q: query,
+        status: status === "all" ? undefined : status,
+        severity: severity === "all" ? undefined : severity,
+        limit: PAGE_SIZE + 1,
+        offset: nextOffset,
+      });
+      if (version !== loadVersion.current) return;
       setCases((current) => {
         const known = new Set(current.map((item) => item.id));
         return [...current, ...page.slice(0, PAGE_SIZE).filter((item) => !known.has(item.id))];
@@ -89,31 +115,22 @@ export default function BlueCasesPage() {
       setNextOffset(nextOffset + Math.min(page.length, PAGE_SIZE));
       setHasMore(page.length > PAGE_SIZE);
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : copy.loadFailed);
+      if (version === loadVersion.current) toast.error(cause instanceof Error ? cause.message : copy.loadFailed);
     } finally {
-      setLoadingMore(false);
+      if (version === loadVersion.current) setLoadingMore(false);
     }
   }
-
-  const visible = cases.filter((item) => {
-    if (status !== "all" && item.status !== status) return false;
-    if (severity !== "all" && item.severity !== severity) return false;
-    if (!search.trim()) return true;
-    const q = search.trim().toLocaleLowerCase();
-    return `${item.id} ${item.title} ${item.description} ${item.summary}`.toLocaleLowerCase().includes(q);
-  });
 
   async function createCase(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!title.trim()) return;
     setCreating(true);
     try {
-      const created = await blueApi.createCase({
+      await blueApi.createCase({
         title: title.trim(),
         description: description.trim(),
         severity: newSeverity,
       });
-      setCases((items) => [created, ...items]);
       void load();
       setTitle("");
       setDescription("");
@@ -244,10 +261,10 @@ export default function BlueCasesPage() {
 
       {error && <BlueError message={error} retry={() => void load()} retryLabel={copy.refresh} />}
       {loading && cases.length === 0 ? <BlueLoading label={copy.loading} /> : null}
-      {!loading && visible.length === 0 ? <BlueEmpty message={copy.noCases} /> : null}
-      {visible.length > 0 && (
+      {!loading && !error && cases.length === 0 ? <BlueEmpty message={copy.noCases} /> : null}
+      {cases.length > 0 && (
         <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-          {visible.map((item) => (
+          {cases.map((item) => (
             <Card key={item.id} className="transition-colors hover:border-primary/50">
               <CardContent className="space-y-3 p-4">
                 <div className="flex items-start justify-between gap-3">

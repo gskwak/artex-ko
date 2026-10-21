@@ -2,6 +2,8 @@
 
 import * as React from "react";
 
+import Link from "next/link";
+
 import {
   CheckIcon,
   ChevronDown,
@@ -599,6 +601,7 @@ function UserRow({
   getDetail: (seq: number) => Promise<string>;
 }) {
   const Icon = intent ? CrosshairIcon : UserIcon;
+  const nav = useTranslations("nav.item");
   const [ref, inView] = useInView();
   // Optimistic echoes carry their detail inline; persisted rows lazy-load it on scroll.
   const inline = step.detail && step.detail.length > 0 ? step.detail : null;
@@ -619,9 +622,19 @@ function UserRow({
     };
   }, [inView, step.seq, getDetail, step.summary, inline]);
   const { text, attachments } = parseUserBody(full ?? step.summary);
+  const blueCase = step.metadata?.blue_case;
   return (
     <div ref={ref} className="mt-3 mb-2 flex min-w-0 justify-end gap-2">
       <div className="flex min-w-0 max-w-[85%] flex-col items-end gap-1.5">
+        {blueCase && (
+          <Link
+            href={`/blue/cases/detail?id=${blueCase.id}`}
+            className="max-w-full truncate rounded-md border bg-card px-2 py-1 text-xs text-primary hover:underline"
+            title={blueCase.title}
+          >
+            {nav("blueCases")} #{blueCase.id} · {blueCase.title}
+          </Link>
+        )}
         {attachments.length > 0 && (
           <div className="flex min-w-0 max-w-full flex-wrap justify-end gap-1.5">
             {attachments.map((a) => (

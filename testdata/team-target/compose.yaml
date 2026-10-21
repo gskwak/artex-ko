@@ -1,0 +1,23 @@
+services:
+  target:
+    build: .
+    image: artex-lab-target:local
+    container_name: artex-lab-target
+    restart: "no"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    volumes:
+      - ../../test-results/team-target:/logs
+    networks:
+      artex:
+        aliases:
+          - artex-lab-target
+
+networks:
+  artex:
+    external: true
+    name: ${ARTEX_DOCKER_NETWORK:-artex-ko_default}

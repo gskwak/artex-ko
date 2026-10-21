@@ -103,20 +103,22 @@ export function NavMain({ items }: NavMainProps) {
     }
   })();
 
+  const matchesRoute = (url: string) => path === url || path.startsWith(`${url}/`);
+
   const isItemActive = (item: NavMainItem) => {
     if (hasSubItems(item)) {
-      return item.subItems.some((sub) => path.startsWith(sub.url));
+      return item.subItems.some((sub) => matchesRoute(sub.url));
     }
 
-    return [item.url, ...(item.activeUrls ?? [])].some((url) => path === url || path.startsWith(`${url}/`));
+    return [item.url, ...(item.activeUrls ?? [])].some(matchesRoute);
   };
 
   const isSubItemActive = (url: string) => {
-    return path === url;
+    return matchesRoute(url);
   };
 
   const isSubmenuOpen = (item: NavMainParentItem) => {
-    return item.subItems.some((sub) => path.startsWith(sub.url));
+    return item.subItems.some((sub) => matchesRoute(sub.url));
   };
 
   return (

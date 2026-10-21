@@ -34,9 +34,8 @@ export interface BlueAnalysisRun {
   observation_id?: number | null;
   error?: string;
   created_at: string;
-  updated_at: string;
   started_at?: string | null;
-  completed_at?: string | null;
+  finished_at?: string | null;
 }
 
 export interface BlueEvent {
@@ -187,7 +186,7 @@ async function uploadBlueFile<T>(path: string, file: File, source?: string): Pro
 
 export const blueApi = {
   overview: () => blueRequest<BlueOverview>("/overview"),
-  cases: (query?: { status?: BlueCaseStatus; severity?: BlueSeverity; limit?: number; offset?: number }) =>
+  cases: (query?: { q?: string; status?: BlueCaseStatus; severity?: BlueSeverity; limit?: number; offset?: number }) =>
     blueRequest<BlueCase[]>(withQuery("/cases", query)),
   getCase: (id: number) => blueRequest<BlueCase>(`/cases/${id}`),
   createCase: (body: { title: string; description?: string; severity?: BlueSeverity }) =>
@@ -196,8 +195,14 @@ export const blueApi = {
     id: number,
     body: Partial<Pick<BlueCase, "title" | "description" | "status" | "severity" | "summary">>,
   ) => blueRequest<BlueCase>(`/cases/${id}`, json("PATCH", body)),
-  events: (query?: { case_id?: number; source?: string; limit?: number; offset?: number }) =>
-    blueRequest<BlueEvent[]>(withQuery("/events", query)),
+  events: (query?: {
+    q?: string;
+    case_id?: number;
+    source?: string;
+    severity?: BlueSeverity;
+    limit?: number;
+    offset?: number;
+  }) => blueRequest<BlueEvent[]>(withQuery("/events", query)),
   traffic: (query?: { limit?: number; offset?: number; q?: string; source?: string; protocol?: string }) =>
     blueRequest<{ items: BlueEvent[]; total: number }>(withQuery("/traffic", query)),
   getEvent: (id: number) => blueRequest<BlueEvent>(`/events/${id}`),
@@ -206,6 +211,7 @@ export const blueApi = {
   importEvents: (events: BlueEventInput[]) => blueRequest<BlueImportResult>("/events/import", json("POST", { events })),
   uploadEvents: (file: File, source?: string) => uploadBlueFile<BlueImportResult>("/events/import", file, source),
   alerts: (query?: {
+    q?: string;
     case_id?: number;
     status?: BlueAlertStatus;
     severity?: BlueSeverity;

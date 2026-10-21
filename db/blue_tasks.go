@@ -74,9 +74,43 @@ func (d *DB) GetBlueTask(ctx context.Context, id int64) (*BlueTask, error) {
 }
 
 func (d *DB) ListBlueTasks(ctx context.Context, status string, caseID *int64, limit, offset int) ([]BlueTask, error) {
-	rows, err := d.QueryContext(ctx, `SELECT `+blueTaskColumns+` FROM blue_tasks
-		WHERE ($1='' OR status=$1) AND ($2::bigint IS NULL OR case_id=$2)
-		ORDER BY updated_at DESC,id DESC LIMIT $3 OFFSET $4`, status, caseID, blueLimit(limit), blueOffset(offset))
+	return d.SearchBlueTasks(ctx, status, "", caseID, "", "updated", "desc", limit, offset)
+}
+
+// SearchBlueTasks applies search, filters, and ordering in PostgreSQL before
+// pagination. The ORDER BY expression comes only from this fixed allowlist.
+func (d *DB) SearchBlueTasks(ctx context.Context, status, priority string, caseID *int64, query, sort, order string, limit, offset int) ([]BlueTask, error) {
+	sortColumns := map[string]string{
+		"id":       "t.id",
+		"title":    "lower(t.title)",
+		"status":   "CASE t.status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'blocked' THEN 2 WHEN 'completed' THEN 3 ELSE 4 END",
+		"priority": "CASE t.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END",
+		"updated":  "t.updated_at",
+	}
+	sortColumn, ok := sortColumns[sort]
+	if !ok {
+		sortColumn = sortColumns["updated"]
+	}
+	direction := "DESC"
+	if order == "asc" {
+		direction = "ASC"
+	}
+	tieBreak := ",t.id DESC"
+	if sort == "id" {
+		tieBreak = ""
+	}
+	const columns = `t.id,t.title,t.description,t.case_id,t.priority,t.status,t.result,t.analysis_run_id,t.created_at,t.updated_at,t.completed_at`
+	rows, err := d.QueryContext(ctx, `SELECT `+columns+` FROM blue_tasks t
+		LEFT JOIN blue_cases c ON c.id=t.case_id
+		WHERE ($1='' OR t.status=$1) AND ($2='' OR t.priority=$2)
+		AND ($3::bigint IS NULL OR t.case_id=$3)
+		AND ($4='' OR strpos(lower(t.id::text),lower($4))>0
+			OR strpos(lower(t.title),lower($4))>0
+			OR strpos(lower(t.description),lower($4))>0
+			OR strpos(lower(t.result),lower($4))>0
+			OR strpos(lower(COALESCE(c.title,'')),lower($4))>0)
+		ORDER BY `+sortColumn+` `+direction+tieBreak+` LIMIT $5 OFFSET $6`,
+		status, priority, caseID, query, blueLimit(limit), blueOffset(offset))
 	if err != nil {
 		return nil, err
 	}
@@ -93,15 +127,29 @@ func (d *DB) ListBlueTasks(ctx context.Context, status string, caseID *int64, li
 }
 
 // PatchBlueTask rejects edits while its analyst run is active, preventing a
-// manual status change from racing with the run's eventual result.
+// manual status change from racing with the run's eventual result. A changed
+// request or case invalidates the old outcome, even when a client sends the
+// previous status and result back with the edit.
 func (d *DB) PatchBlueTask(ctx context.Context, id int64, p BlueTaskPatch) (*BlueTask, error) {
-	t, err := scanBlueTask(d.QueryRowContext(ctx, `UPDATE blue_tasks AS t SET
-		title=COALESCE($2,title),description=COALESCE($3,description),
-		case_id=CASE WHEN $4 THEN NULL ELSE COALESCE($5,case_id) END,
-		priority=COALESCE($6,priority),status=COALESCE($7,status),result=COALESCE($8,result),
-		completed_at=CASE WHEN $7='completed' THEN now()
-			WHEN $7 IS NOT NULL THEN NULL ELSE completed_at END
-		WHERE id=$1 AND NOT EXISTS (
+	t, err := scanBlueTask(d.QueryRowContext(ctx, `WITH edit AS (
+		SELECT id AS task_id, ($2::text IS NOT NULL AND $2::text IS DISTINCT FROM title
+			OR $3::text IS NOT NULL AND $3::text IS DISTINCT FROM description
+			OR $4::boolean AND case_id IS NOT NULL
+			OR $5::bigint IS NOT NULL AND $5::bigint IS DISTINCT FROM case_id) AS changed
+		FROM blue_tasks WHERE id=$1 FOR UPDATE
+	)
+		UPDATE blue_tasks AS t SET
+		title=COALESCE($2,t.title),description=COALESCE($3,t.description),
+		case_id=CASE WHEN $4 THEN NULL ELSE COALESCE($5,t.case_id) END,
+		priority=COALESCE($6,t.priority),
+		status=CASE WHEN edit.changed THEN 'open' ELSE COALESCE($7,t.status) END,
+		result=CASE WHEN edit.changed THEN '' ELSE COALESCE($8,t.result) END,
+		analysis_run_id=CASE WHEN edit.changed THEN NULL ELSE t.analysis_run_id END,
+		completed_at=CASE WHEN edit.changed THEN NULL WHEN $7='completed' THEN now()
+			WHEN $7 IS NOT NULL THEN NULL ELSE t.completed_at END
+		FROM edit WHERE t.id=edit.task_id
+		AND NOT (t.status='in_progress' AND t.analysis_run_id IS NOT NULL)
+		AND NOT EXISTS (
 			SELECT 1 FROM blue_analysis_runs r WHERE r.id=t.analysis_run_id
 			AND r.status IN ('queued','running'))
 		RETURNING `+blueTaskColumns, id, blueOptionalString(p.Title), blueOptionalString(p.Description),
@@ -145,9 +193,11 @@ func (d *DB) AttachBlueTaskRun(ctx context.Context, taskID, runID int64) (*BlueT
 // is used during startup recovery for jobs interrupted by a server restart.
 func (d *DB) SyncBlueTaskFromRun(ctx context.Context, runID int64) error {
 	_, err := d.ExecContext(ctx, `UPDATE blue_tasks t SET
-		status=CASE WHEN r.status='completed' THEN 'completed' ELSE 'blocked' END,
+		status=CASE WHEN r.status='completed' AND o.assessment->'task_outcome'->>'status'='answered'
+			THEN 'completed' ELSE 'blocked' END,
 		result=CASE WHEN r.status='completed' THEN COALESCE(o.detail,'') ELSE r.error END,
-		completed_at=CASE WHEN r.status='completed' THEN r.finished_at ELSE NULL END
+		completed_at=CASE WHEN r.status='completed' AND o.assessment->'task_outcome'->>'status'='answered'
+			THEN r.finished_at ELSE NULL END
 		FROM blue_analysis_runs r LEFT JOIN blue_observations o ON o.id=r.observation_id
 		WHERE t.analysis_run_id=r.id AND r.id=$1 AND r.status IN ('completed','failed')
 		AND t.status='in_progress'`, runID)
@@ -156,9 +206,11 @@ func (d *DB) SyncBlueTaskFromRun(ctx context.Context, runID int64) error {
 
 func (d *DB) SyncFinishedBlueTaskRuns(ctx context.Context) error {
 	_, err := d.ExecContext(ctx, `UPDATE blue_tasks t SET
-		status=CASE WHEN r.status='completed' THEN 'completed' ELSE 'blocked' END,
+		status=CASE WHEN r.status='completed' AND o.assessment->'task_outcome'->>'status'='answered'
+			THEN 'completed' ELSE 'blocked' END,
 		result=CASE WHEN r.status='completed' THEN COALESCE(o.detail,'') ELSE r.error END,
-		completed_at=CASE WHEN r.status='completed' THEN r.finished_at ELSE NULL END
+		completed_at=CASE WHEN r.status='completed' AND o.assessment->'task_outcome'->>'status'='answered'
+			THEN r.finished_at ELSE NULL END
 		FROM blue_analysis_runs r LEFT JOIN blue_observations o ON o.id=r.observation_id
 		WHERE t.analysis_run_id=r.id AND r.status IN ('completed','failed')
 		AND t.status='in_progress'`)

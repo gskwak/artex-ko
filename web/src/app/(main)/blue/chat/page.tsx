@@ -7,6 +7,7 @@ import {
   Bot,
   ChevronDown,
   ChevronRight,
+  FolderOpen,
   ListChecks,
   Loader2,
   MoreHorizontal,
@@ -17,6 +18,7 @@ import {
   Search,
   Square,
   Trash2,
+  X,
   Zap,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -51,6 +53,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useActiveLocale } from "@/i18n/locale-store";
 import { mergeActivities } from "@/lib/activity-merge";
 import { api } from "@/lib/api";
+import { type BlueCase, blueApi } from "@/lib/blue-api";
 import { blueChatApi } from "@/lib/blue-chat-api";
 import { useBlueChatCopy } from "@/lib/blue-chat-copy";
 import { shouldSubmitOnKey, useChatSendMode } from "@/lib/chat-send-mode";
@@ -61,6 +64,147 @@ import { BlueError } from "../_components/blue-ui";
 
 const HISTORY_PAGE = 200;
 const CONVERSATION_LIST_PAGE = 100;
+type CaseSelection = Pick<BlueCase, "id" | "title">;
+
+function CaseEvidencePicker({
+  selected,
+  onChange,
+  disabled,
+}: {
+  selected: CaseSelection | null;
+  onChange: (item: CaseSelection | null) => void;
+  disabled?: boolean;
+}) {
+  const copy = useBlueChatCopy();
+  const [open, setOpen] = React.useState(false);
+  const [cases, setCases] = React.useState<BlueCase[]>([]);
+  const [query, setQuery] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [lookupBusy, setLookupBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setLoading(true);
+    const timer = setTimeout(
+      () => {
+        blueApi
+          .cases({ limit: 100, q: query.trim() })
+          .then(
+            (items) => {
+              if (active) setCases(items);
+            },
+            (cause: unknown) => {
+              if (active) toast.error(cause instanceof Error ? cause.message : copy.loadFailed);
+            },
+          )
+          .finally(() => {
+            if (active) setLoading(false);
+          });
+      },
+      query.trim() ? 200 : 0,
+    );
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [open, query, copy.loadFailed]);
+
+  const lookupID = Number(query.trim());
+  const canLookupID = Number.isSafeInteger(lookupID) && lookupID > 0 && !cases.some((item) => item.id === lookupID);
+
+  async function findByID() {
+    if (!canLookupID || lookupBusy) return;
+    setLookupBusy(true);
+    try {
+      const item = await blueApi.getCase(lookupID);
+      onChange(item);
+      setOpen(false);
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : copy.caseLookupFailed);
+    } finally {
+      setLookupBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex min-w-0 items-center gap-1.5">
+      <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
+        <PopoverTrigger asChild>
+          <Button type="button" variant="outline" size="sm" disabled={disabled} className="max-w-full">
+            <FolderOpen className="size-3.5" />
+            <span className="truncate" title={selected?.title}>
+              {selected ? `${copy.caseEvidence} #${selected.id}: ${selected.title}` : copy.attachCase}
+            </span>
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-72 p-2">
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && canLookupID) {
+                event.preventDefault();
+                void findByID();
+              }
+            }}
+            placeholder={copy.caseSearch}
+            aria-label={copy.caseSearch}
+            className="h-8 text-xs"
+          />
+          <div className="mt-2 max-h-52 overflow-y-auto">
+            {loading && <p className="px-2 py-3 text-xs text-muted-foreground">{copy.loading}</p>}
+            {!loading && cases.length === 0 && (
+              <p className="px-2 py-3 text-xs text-muted-foreground">{copy.noCaseMatches}</p>
+            )}
+            {!loading &&
+              cases.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="flex w-full flex-col rounded px-2 py-1.5 text-left text-xs hover:bg-accent"
+                  onClick={() => {
+                    onChange(item);
+                    setOpen(false);
+                  }}
+                >
+                  <span className="truncate font-medium">
+                    #{item.id} · {item.title}
+                  </span>
+                  <span className="text-muted-foreground">{item.status}</span>
+                </button>
+              ))}
+          </div>
+          {canLookupID && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="mt-2 w-full"
+              onClick={() => void findByID()}
+              disabled={lookupBusy}
+            >
+              {lookupBusy && <Loader2 className="size-3.5 animate-spin" />}#{lookupID}
+            </Button>
+          )}
+        </PopoverContent>
+      </Popover>
+      {selected && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          disabled={disabled}
+          onClick={() => onChange(null)}
+          aria-label={copy.removeCase}
+          title={copy.removeCase}
+        >
+          <X className="size-3.5" />
+        </Button>
+      )}
+    </div>
+  );
+}
 
 function pinned(conversation: Conversation): boolean {
   return conversation.pinned ?? Boolean(conversation.pinned_at);
@@ -155,6 +299,7 @@ function Composer({
   running,
   disabled,
   leftSlot,
+  evidenceSlot,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -164,6 +309,7 @@ function Composer({
   running: boolean;
   disabled?: boolean;
   leftSlot?: React.ReactNode;
+  evidenceSlot?: React.ReactNode;
 }) {
   const copy = useBlueChatCopy();
   const sendMode = useChatSendMode();
@@ -210,6 +356,7 @@ function Composer({
           </Button>
         )}
       </div>
+      {evidenceSlot && <div className="mt-2">{evidenceSlot}</div>}
     </div>
   );
 }
@@ -233,6 +380,7 @@ function ConversationView({
   const [running, setRunning] = React.useState(!!conversation.running);
   const [busy, setBusy] = React.useState(false);
   const [input, setInput] = React.useState("");
+  const [attachedCase, setAttachedCase] = React.useState<CaseSelection | null>(null);
   const [profileBusy, setProfileBusy] = React.useState(false);
   const cursorRef = React.useRef(0);
   const earliestRef = React.useRef(0);
@@ -259,6 +407,9 @@ function ConversationView({
       (page) => {
         if (!active) return;
         setMessages(page.items);
+        const lastUser = [...page.items].reverse().find((item) => item.kind === "user");
+        const linkedCase = lastUser?.metadata?.blue_case;
+        setAttachedCase(linkedCase ? { id: linkedCase.id, title: linkedCase.title } : null);
         cursorRef.current = page.cursor;
         earliestRef.current = page.items[0]?.seq ?? 0;
         setHasMore(!!page.hasMore);
@@ -362,7 +513,7 @@ function ConversationView({
     setInput("");
     setBusy(true);
     try {
-      await blueChatApi.send(conversation.id, message);
+      await blueChatApi.send(conversation.id, message, attachedCase?.id);
       wasRunningRef.current = true;
       setRunning(true);
       onUpdated();
@@ -443,6 +594,9 @@ function ConversationView({
         onStop={() => void stop()}
         busy={busy}
         running={running}
+        evidenceSlot={
+          <CaseEvidencePicker selected={attachedCase} onChange={setAttachedCase} disabled={busy || running} />
+        }
       />
       <ModelPicker
         profiles={profiles}
@@ -463,6 +617,7 @@ function DraftView({
 }) {
   const copy = useBlueChatCopy();
   const [input, setInput] = React.useState("");
+  const [attachedCase, setAttachedCase] = React.useState<CaseSelection | null>(null);
   const [profileID, setProfileID] = React.useState<number | null>(null);
   const [busy, setBusy] = React.useState(false);
   async function send() {
@@ -471,7 +626,7 @@ function DraftView({
     setBusy(true);
     try {
       const conversation = await blueChatApi.createConversation("", profileID);
-      await blueChatApi.send(conversation.id, message);
+      await blueChatApi.send(conversation.id, message, attachedCase?.id);
       setInput("");
       onStarted({ ...conversation, running: true });
     } catch (cause) {
@@ -496,6 +651,7 @@ function DraftView({
         onSend={() => void send()}
         busy={busy}
         running={false}
+        evidenceSlot={<CaseEvidencePicker selected={attachedCase} onChange={setAttachedCase} disabled={busy} />}
         leftSlot={
           <div className="flex h-9 w-full items-center gap-2 rounded-md border bg-background px-3 text-sm sm:w-40">
             <Bot className="size-3.5" />

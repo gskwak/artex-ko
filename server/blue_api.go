@@ -35,6 +35,7 @@ func (s *Server) registerBlueRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/blue/tasks/{id}", s.blueGetTask)
 	mux.HandleFunc("PATCH /api/blue/tasks/{id}", s.bluePatchTask)
 	mux.HandleFunc("POST /api/blue/tasks/{id}/run", s.blueRunTask)
+	mux.HandleFunc("POST /api/blue/tasks/{id}/stop", s.blueStopTask)
 	mux.HandleFunc("GET /api/blue/cases", s.blueListCases)
 	mux.HandleFunc("POST /api/blue/cases", s.blueCreateCase)
 	mux.HandleFunc("POST /api/blue/cases/from-finding", s.blueCaseFromFinding)
@@ -207,7 +208,16 @@ func (s *Server) blueListCases(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid case status")
 		return
 	}
-	items, err := pg.ListBlueCases(r.Context(), status, limit, offset)
+	severity := r.URL.Query().Get("severity")
+	if severity != "" && !validBlueSeverity(severity) {
+		writeErr(w, http.StatusBadRequest, "invalid case severity")
+		return
+	}
+	query, ok := blueSearchQuery(w, r)
+	if !ok {
+		return
+	}
+	items, err := pg.SearchBlueCases(r.Context(), status, severity, query, limit, offset)
 	if err != nil {
 		blueInternal(w, err)
 		return
@@ -403,7 +413,16 @@ func (s *Server) blueListEvents(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "source filter is too long")
 		return
 	}
-	items, err := pg.ListBlueEvents(r.Context(), caseID, source, limit, offset)
+	severity := r.URL.Query().Get("severity")
+	if severity != "" && !validBlueSeverity(severity) {
+		writeErr(w, http.StatusBadRequest, "invalid event severity")
+		return
+	}
+	query, ok := blueSearchQuery(w, r)
+	if !ok {
+		return
+	}
+	items, err := pg.SearchBlueEvents(r.Context(), caseID, source, severity, query, limit, offset)
 	if err != nil {
 		blueInternal(w, err)
 		return
@@ -903,11 +922,14 @@ func (s *Server) blueApplyEnabledRules(r *http.Request, pg *db.DB, events []db.B
 	return matched, created, failures, warnings
 }
 
-func blueOptionalLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
+type blueRuleRunOptions struct {
+	Limit    int    `json:"limit"`
+	BeforeID *int64 `json:"before_id"`
+}
+
+func blueOptionalLimit(w http.ResponseWriter, r *http.Request) (blueRuleRunOptions, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
-	var req struct {
-		Limit int `json:"limit"`
-	}
+	var req blueRuleRunOptions
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil && err != io.EOF {
@@ -917,7 +939,7 @@ func blueOptionalLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
 		} else {
 			writeErr(w, http.StatusBadRequest, "invalid run options: "+err.Error())
 		}
-		return 0, false
+		return blueRuleRunOptions{}, false
 	}
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
@@ -927,16 +949,20 @@ func blueOptionalLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
 		} else {
 			writeErr(w, http.StatusBadRequest, "run options must contain one JSON value")
 		}
-		return 0, false
+		return blueRuleRunOptions{}, false
 	}
 	if req.Limit == 0 {
 		req.Limit = 5000
 	}
 	if req.Limit < 1 || req.Limit > 50000 {
 		writeErr(w, http.StatusBadRequest, "limit must be between 1 and 50000")
-		return 0, false
+		return blueRuleRunOptions{}, false
 	}
-	return req.Limit, true
+	if req.BeforeID != nil && *req.BeforeID <= 0 {
+		writeErr(w, http.StatusBadRequest, "before_id must be positive")
+		return blueRuleRunOptions{}, false
+	}
+	return req, true
 }
 
 func (s *Server) blueEvaluateRule(w http.ResponseWriter, r *http.Request, persist bool) {
@@ -948,7 +974,7 @@ func (s *Server) blueEvaluateRule(w http.ResponseWriter, r *http.Request, persis
 	if !ok {
 		return
 	}
-	limit, ok := blueOptionalLimit(w, r)
+	options, ok := blueOptionalLimit(w, r)
 	if !ok {
 		return
 	}
@@ -977,19 +1003,22 @@ func (s *Server) blueEvaluateRule(w http.ResponseWriter, r *http.Request, persis
 		blueInternal(w, err)
 		return
 	}
-	var afterID int64
-	for scanned < limit {
+	var beforeID int64
+	if options.BeforeID != nil {
+		beforeID = *options.BeforeID
+	}
+	for scanned < options.Limit {
 		pageSize := 250
-		if left := limit - scanned; left < pageSize {
+		if left := options.Limit - scanned; left < pageSize {
 			pageSize = left
 		}
-		events, err := pg.ListBlueEventsAfterID(r.Context(), afterID, maxID, pageSize)
+		events, err := pg.ListBlueEventsBeforeID(r.Context(), beforeID, maxID, pageSize)
 		if err != nil {
 			blueInternal(w, err)
 			return
 		}
 		for _, ev := range events {
-			afterID = ev.ID
+			beforeID = ev.ID
 			scanned++
 			if !compiled.Match(blueEventFields(ev)) {
 				continue
@@ -1016,7 +1045,20 @@ func (s *Server) blueEvaluateRule(w http.ResponseWriter, r *http.Request, persis
 			break
 		}
 	}
-	result := map[string]any{"matched_count": matched, "scanned_count": scanned, "matches": matches}
+	hasMore := false
+	if scanned == options.Limit {
+		older, err := pg.ListBlueEventsBeforeID(r.Context(), beforeID, maxID, 1)
+		if err != nil {
+			blueInternal(w, err)
+			return
+		}
+		hasMore = len(older) > 0
+	}
+	result := map[string]any{"matched_count": matched, "scanned_count": scanned, "matches": matches,
+		"has_more": hasMore}
+	if hasMore {
+		result["next_before_id"] = beforeID
+	}
 	if persist {
 		result["created_alerts"] = created
 	}
@@ -1053,7 +1095,11 @@ func (s *Server) blueListAlerts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid alert severity")
 		return
 	}
-	items, err := pg.ListBlueAlerts(r.Context(), caseID, status, severity, limit, offset)
+	query, ok := blueSearchQuery(w, r)
+	if !ok {
+		return
+	}
+	items, err := pg.SearchBlueAlerts(r.Context(), caseID, status, severity, query, limit, offset)
 	if err != nil {
 		blueInternal(w, err)
 		return

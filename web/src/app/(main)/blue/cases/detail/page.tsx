@@ -5,7 +5,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
-import { ArrowLeft, Bot, ExternalLink, RefreshCw, Save } from "lucide-react";
+import { ArrowLeft, Bot, Download, ExternalLink, RefreshCw, Save } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +29,7 @@ import {
   blueApi,
 } from "@/lib/blue-api";
 import { blueCaseStatusLabel, blueObservationKindLabel, blueSeverityLabel, useBlueCopy } from "@/lib/blue-copy";
+import { blueReportButtonCopy, downloadBlueCaseReport } from "@/lib/blue-report";
 
 import {
   BlueAlertStatusBadge,
@@ -121,6 +122,7 @@ function CaseDetailInner() {
   const [summary, setSummary] = React.useState("");
   const [saving, setSaving] = React.useState(false);
   const [analyzing, setAnalyzing] = React.useState(false);
+  const [reporting, setReporting] = React.useState(false);
   const [noteKind, setNoteKind] = React.useState<BlueObservationKind>("fact");
   const [noteSummary, setNoteSummary] = React.useState("");
   const [noteDetail, setNoteDetail] = React.useState("");
@@ -151,6 +153,7 @@ function CaseDetailInner() {
     high: blueSeverityLabel("high", locale),
     critical: blueSeverityLabel("critical", locale),
   };
+  const reportCopy = blueReportButtonCopy(locale);
 
   const load = React.useCallback(async () => {
     if (!Number.isSafeInteger(id) || id <= 0) {
@@ -246,6 +249,18 @@ function CaseDetailInner() {
       toast.error(cause instanceof Error ? cause.message : copy.analysisFailed);
     } finally {
       setAnalyzing(false);
+    }
+  }
+
+  async function downloadReport() {
+    if (!item) return;
+    setReporting(true);
+    try {
+      await downloadBlueCaseReport(item.id, locale);
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : reportCopy.failed);
+    } finally {
+      setReporting(false);
     }
   }
 
@@ -371,6 +386,10 @@ function CaseDetailInner() {
                 <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
                   <RefreshCw className={loading ? "animate-spin" : ""} />
                   {copy.refresh}
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => void downloadReport()} disabled={reporting}>
+                  <Download />
+                  {reporting ? reportCopy.downloading : reportCopy.download}
                 </Button>
                 <Button size="sm" onClick={() => void analyze()} disabled={analyzing || hasActiveAnalysis}>
                   <Bot />

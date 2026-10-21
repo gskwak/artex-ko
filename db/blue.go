@@ -249,8 +249,20 @@ func (d *DB) GetBlueCase(ctx context.Context, id int64) (*BlueCase, error) {
 }
 
 func (d *DB) ListBlueCases(ctx context.Context, status string, limit, offset int) ([]BlueCase, error) {
+	return d.SearchBlueCases(ctx, status, "", "", limit, offset)
+}
+
+// SearchBlueCases applies all filters before limiting the result, so an older
+// matching case cannot disappear merely because it is outside the first page.
+func (d *DB) SearchBlueCases(ctx context.Context, status, severity, query string, limit, offset int) ([]BlueCase, error) {
 	rows, err := d.QueryContext(ctx, `SELECT `+blueCaseColumns+` FROM blue_cases
-		WHERE ($1='' OR status=$1) ORDER BY updated_at DESC,id DESC LIMIT $2 OFFSET $3`, status, blueLimit(limit), blueOffset(offset))
+		WHERE ($1='' OR status=$1) AND ($2='' OR severity=$2)
+		AND ($3='' OR strpos(lower(id::text),lower($3))>0
+			OR strpos(lower(title),lower($3))>0
+			OR strpos(lower(description),lower($3))>0
+			OR strpos(lower(summary),lower($3))>0)
+		ORDER BY updated_at DESC,id DESC LIMIT $4 OFFSET $5`,
+		status, severity, query, blueLimit(limit), blueOffset(offset))
 	if err != nil {
 		return nil, err
 	}
@@ -352,9 +364,26 @@ func (d *DB) GetBlueEvent(ctx context.Context, id int64) (*BlueEvent, error) {
 }
 
 func (d *DB) ListBlueEvents(ctx context.Context, caseID *int64, source string, limit, offset int) ([]BlueEvent, error) {
+	return d.SearchBlueEvents(ctx, caseID, source, "", "", limit, offset)
+}
+
+// SearchBlueEvents uses literal substring matches rather than LIKE patterns.
+// Raw telemetry is included because many imported formats keep useful fields
+// only in their original JSON payload.
+func (d *DB) SearchBlueEvents(ctx context.Context, caseID *int64, source, severity, query string, limit, offset int) ([]BlueEvent, error) {
 	rows, err := d.QueryContext(ctx, `SELECT `+blueEventColumns+` FROM blue_events
-		WHERE ($1::bigint IS NULL OR case_id=$1) AND ($2='' OR source=$2)
-		ORDER BY occurred_at DESC,id DESC LIMIT $3 OFFSET $4`, caseID, source, blueLimit(limit), blueOffset(offset))
+		WHERE ($1::bigint IS NULL OR case_id=$1)
+		AND ($2='' OR strpos(lower(source),lower($2))>0)
+		AND ($3='' OR severity=$3)
+		AND ($4='' OR strpos(lower(id::text),lower($4))>0
+			OR strpos(lower(source),lower($4))>0
+			OR strpos(lower(COALESCE(external_id,'')),lower($4))>0
+			OR strpos(lower(event_type),lower($4))>0
+			OR strpos(lower(asset),lower($4))>0
+			OR strpos(lower(message),lower($4))>0
+			OR strpos(lower(raw::text),lower($4))>0)
+		ORDER BY occurred_at DESC,id DESC LIMIT $5 OFFSET $6`,
+		caseID, source, severity, query, blueLimit(limit), blueOffset(offset))
 	if err != nil {
 		return nil, err
 	}
@@ -391,6 +420,28 @@ func (d *DB) BlueEventHighWatermark(ctx context.Context) (int64, error) {
 func (d *DB) ListBlueEventsAfterID(ctx context.Context, afterID, maxID int64, limit int) ([]BlueEvent, error) {
 	rows, err := d.QueryContext(ctx, `SELECT `+blueEventColumns+` FROM blue_events
 		WHERE id>$1 AND id<=$2 ORDER BY id ASC LIMIT $3`, afterID, maxID, blueLimit(limit))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []BlueEvent{}
+	for rows.Next() {
+		e, err := scanBlueEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *e)
+	}
+	return out, rows.Err()
+}
+
+// ListBlueEventsBeforeID scans the newest events first for a manual detection
+// pass. A positive beforeID resumes with older records; maxID bounds the
+// initial snapshot so newer imports do not shift the active pass.
+func (d *DB) ListBlueEventsBeforeID(ctx context.Context, beforeID, maxID int64, limit int) ([]BlueEvent, error) {
+	rows, err := d.QueryContext(ctx, `SELECT `+blueEventColumns+` FROM blue_events
+		WHERE id<=$1 AND ($2::bigint=0 OR id<$2)
+		ORDER BY id DESC LIMIT $3`, maxID, beforeID, blueLimit(limit))
 	if err != nil {
 		return nil, err
 	}
@@ -557,9 +608,19 @@ func (d *DB) UpsertBlueAlert(ctx context.Context, a BlueAlert) (_ *BlueAlert, er
 }
 
 func (d *DB) ListBlueAlerts(ctx context.Context, caseID *int64, status, severity string, limit, offset int) ([]BlueAlert, error) {
+	return d.SearchBlueAlerts(ctx, caseID, status, severity, "", limit, offset)
+}
+
+func (d *DB) SearchBlueAlerts(ctx context.Context, caseID *int64, status, severity, query string, limit, offset int) ([]BlueAlert, error) {
 	rows, err := d.QueryContext(ctx, `SELECT `+blueAlertColumns+` FROM blue_alerts
 		WHERE ($1::bigint IS NULL OR case_id=$1) AND ($2='' OR status=$2) AND ($3='' OR severity=$3)
-		ORDER BY created_at DESC,id DESC LIMIT $4 OFFSET $5`, caseID, status, severity, blueLimit(limit), blueOffset(offset))
+		AND ($4='' OR strpos(lower(id::text),lower($4))>0
+			OR strpos(lower(rule_id::text),lower($4))>0
+			OR strpos(lower(event_id::text),lower($4))>0
+			OR strpos(lower(title),lower($4))>0
+			OR strpos(lower(reason),lower($4))>0)
+		ORDER BY created_at DESC,id DESC LIMIT $5 OFFSET $6`,
+		caseID, status, severity, query, blueLimit(limit), blueOffset(offset))
 	if err != nil {
 		return nil, err
 	}
@@ -840,6 +901,16 @@ func (d *DB) CreateBlueObservation(ctx context.Context, o BlueObservation) (_ *B
 		return nil, err
 	}
 	return stored, nil
+}
+
+// A stopped analysis may race with storing an observation. Its run can no
+// longer complete, so remove only the just-created, unattached analyst row.
+// A run that did complete still references the observation and is preserved.
+func (d *DB) DeleteUnattachedBlueAnalysisObservation(ctx context.Context, id int64) error {
+	_, err := d.ExecContext(ctx, `DELETE FROM blue_observations o
+		WHERE o.id=$1 AND o.kind='analysis' AND o.author='blue_analyst'
+		AND NOT EXISTS (SELECT 1 FROM blue_analysis_runs r WHERE r.observation_id=o.id)`, id)
+	return err
 }
 
 func (d *DB) ListBlueObservations(ctx context.Context, caseID int64, limit, offset int) ([]BlueObservation, error) {

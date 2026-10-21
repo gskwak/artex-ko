@@ -37,8 +37,6 @@ import { BlueError, BlueLoading, blueDate } from "../_components/blue-ui";
 const BATCH_SIZE = 50;
 const STATUSES: BlueTaskStatus[] = ["open", "in_progress", "completed", "blocked"];
 const PRIORITIES: BlueTaskPriority[] = ["low", "medium", "high", "critical"];
-const STATUS_RANK: Record<BlueTaskStatus, number> = { open: 0, in_progress: 1, blocked: 2, completed: 3 };
-const PRIORITY_RANK: Record<BlueTaskPriority, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 
 type SortField = "id" | "title" | "status" | "priority" | "updated";
 type SortDirection = "asc" | "desc";
@@ -84,21 +82,6 @@ function SortHead({
   );
 }
 
-function compareTasks(left: BlueTask, right: BlueTask, field: SortField): number {
-  switch (field) {
-    case "id":
-      return left.id - right.id;
-    case "title":
-      return left.title.localeCompare(right.title);
-    case "status":
-      return STATUS_RANK[left.status] - STATUS_RANK[right.status];
-    case "priority":
-      return PRIORITY_RANK[left.priority] - PRIORITY_RANK[right.priority];
-    case "updated":
-      return Date.parse(left.updated_at) - Date.parse(right.updated_at);
-  }
-}
-
 export default function BlueTasksPage() {
   const router = useRouter();
   const copy = useBlueTaskCopy();
@@ -111,8 +94,9 @@ export default function BlueTasksPage() {
   const [hasMore, setHasMore] = React.useState(false);
   const [error, setError] = React.useState("");
   const [search, setSearch] = React.useState("");
+  const [query, setQuery] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState<BlueTaskStatus | "all">("all");
-  const [caseFilter, setCaseFilter] = React.useState("all");
+  const [caseFilter, setCaseFilter] = React.useState("");
   const [sortField, setSortField] = React.useState<SortField>("updated");
   const [sortDirection, setSortDirection] = React.useState<SortDirection>("desc");
   const [page, setPage] = React.useState(1);
@@ -121,17 +105,28 @@ export default function BlueTasksPage() {
   const [creating, setCreating] = React.useState(false);
   const [title, setTitle] = React.useState("");
   const [description, setDescription] = React.useState("");
-  const [caseID, setCaseID] = React.useState("none");
+  const [caseID, setCaseID] = React.useState("");
   const [priority, setPriority] = React.useState<BlueTaskPriority>("medium");
+
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => setQuery(search.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   const taskQuery = React.useCallback(
     (offset: number) => ({
+      q: query,
       status: statusFilter === "all" ? undefined : statusFilter,
-      case_id: caseFilter === "all" ? undefined : Number(caseFilter),
+      case_id:
+        caseFilter && Number.isSafeInteger(Number(caseFilter)) && Number(caseFilter) > 0
+          ? Number(caseFilter)
+          : undefined,
+      sort: sortField,
+      order: sortDirection,
       limit: BATCH_SIZE + 1,
       offset,
     }),
-    [caseFilter, statusFilter],
+    [caseFilter, query, sortDirection, sortField, statusFilter],
   );
 
   const load = React.useCallback(async () => {
@@ -194,12 +189,12 @@ export default function BlueTasksPage() {
         title: title.trim(),
         description: description.trim(),
         priority,
-        ...(caseID !== "none" ? { case_id: Number(caseID) } : {}),
+        ...(caseID ? { case_id: Number(caseID) } : {}),
       });
       setCreateOpen(false);
       setTitle("");
       setDescription("");
-      setCaseID("none");
+      setCaseID("");
       setPriority("medium");
       toast.success(copy.created);
       router.push(`/blue/tasks/detail?id=${task.id}`);
@@ -211,21 +206,7 @@ export default function BlueTasksPage() {
   }
 
   const caseNames = React.useMemo(() => new Map(cases.map((item) => [item.id, item.title])), [cases]);
-  const visible = React.useMemo(() => {
-    const query = search.trim().toLocaleLowerCase();
-    const filtered = tasks.filter((task) =>
-      query
-        ? `${task.id} ${task.title} ${task.description} ${task.result} ${caseNames.get(task.case_id ?? -1) ?? ""}`
-            .toLocaleLowerCase()
-            .includes(query)
-        : true,
-    );
-    return filtered.sort((left, right) => {
-      const result = compareTasks(left, right, sortField);
-      return (sortDirection === "asc" ? result : -result) || right.id - left.id;
-    });
-  }, [caseNames, search, sortDirection, sortField, tasks]);
-  const shown = visible.slice((page - 1) * pageSize, page * pageSize);
+  const shown = tasks.slice((page - 1) * pageSize, page * pageSize);
 
   function sortBy(field: SortField) {
     if (field === sortField) {
@@ -282,21 +263,28 @@ export default function BlueTasksPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={caseFilter} onValueChange={setCaseFilter}>
-              <SelectTrigger className="w-44" aria-label={copy.case}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{copy.allCases}</SelectItem>
-                {cases.map((item) => (
-                  <SelectItem key={item.id} value={String(item.id)}>
-                    #{item.id} {item.title}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Input
+              type="number"
+              min="1"
+              step="1"
+              list="blue-task-filter-cases"
+              value={caseFilter}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (!value || (/^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value)))) setCaseFilter(value);
+              }}
+              className="w-44"
+              aria-label={copy.case}
+              placeholder={copy.allCases}
+            />
+            <datalist id="blue-task-filter-cases">
+              {cases.map((item) => (
+                <option key={item.id} value={item.id} label={item.title} />
+              ))}
+            </datalist>
             <span className="text-muted-foreground text-xs tabular-nums">
-              {visible.length} / {tasks.length}
+              {tasks.length}
+              {hasMore ? "+" : ""}
             </span>
             <div className="ml-auto flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
@@ -340,19 +328,25 @@ export default function BlueTasksPage() {
                       <div className="grid gap-4 sm:grid-cols-2">
                         <div className="space-y-1.5">
                           <Label htmlFor="blue-task-case">{copy.case}</Label>
-                          <Select value={caseID} onValueChange={setCaseID}>
-                            <SelectTrigger id="blue-task-case" className="w-full">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">{copy.noCase}</SelectItem>
-                              {cases.map((item) => (
-                                <SelectItem key={item.id} value={String(item.id)}>
-                                  #{item.id} {item.title}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <Input
+                            id="blue-task-case"
+                            type="number"
+                            min="1"
+                            step="1"
+                            list="blue-task-create-cases"
+                            value={caseID}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              if (!value || (/^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value))))
+                                setCaseID(value);
+                            }}
+                            placeholder={copy.noCase}
+                          />
+                          <datalist id="blue-task-create-cases">
+                            {cases.map((item) => (
+                              <option key={item.id} value={item.id} label={item.title} />
+                            ))}
+                          </datalist>
                         </div>
                         <div className="space-y-1.5">
                           <Label htmlFor="blue-task-priority">{copy.priority}</Label>
@@ -393,14 +387,12 @@ export default function BlueTasksPage() {
             </div>
           )}
           {loading && tasks.length === 0 ? <BlueLoading label={copy.loading} /> : null}
-          {!loading && visible.length === 0 ? (
+          {!loading && tasks.length === 0 ? (
             <div className="mx-4 flex items-center justify-center rounded-lg border border-dashed py-20 text-muted-foreground text-sm lg:mx-6">
-              {tasks.length === 0 && !search.trim() && statusFilter === "all" && caseFilter === "all"
-                ? copy.noTasks
-                : copy.noMatch}
+              {tasks.length === 0 && !query && statusFilter === "all" && !caseFilter ? copy.noTasks : copy.noMatch}
             </div>
           ) : null}
-          {visible.length > 0 && (
+          {tasks.length > 0 && (
             <Table className="**:data-[slot='table-cell']:px-4 **:data-[slot='table-head']:px-4">
               <TableHeader className="[&_tr]:border-t">
                 <TableRow>
@@ -484,7 +476,7 @@ export default function BlueTasksPage() {
           <TablePagination
             page={page}
             pageSize={pageSize}
-            total={visible.length}
+            total={tasks.length}
             onPageChange={setPage}
             onPageSizeChange={(value) => {
               setPageSize(value);

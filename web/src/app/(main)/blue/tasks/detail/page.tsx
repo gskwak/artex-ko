@@ -5,7 +5,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
-import { ArrowLeft, Bot, ExternalLink, RefreshCw, Save } from "lucide-react";
+import { ArrowLeft, Bot, Download, ExternalLink, RefreshCw, Save, Square } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +17,9 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useActiveLocale } from "@/i18n/locale-store";
+import { ApiError } from "@/lib/api";
 import { type BlueCase, blueApi } from "@/lib/blue-api";
+import { blueReportButtonCopy, downloadBlueTaskReport } from "@/lib/blue-report";
 import {
   type BlueTask,
   type BlueTaskPriority,
@@ -49,6 +51,8 @@ function BlueTaskDetailInner() {
   const [error, setError] = React.useState("");
   const [saving, setSaving] = React.useState(false);
   const [running, setRunning] = React.useState(false);
+  const [stopping, setStopping] = React.useState(false);
+  const [reporting, setReporting] = React.useState(false);
   const [title, setTitle] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [caseID, setCaseID] = React.useState("");
@@ -97,16 +101,21 @@ function BlueTaskDetailInner() {
 
   const analysisInProgress = task?.status === "in_progress" && Boolean(task.analysis_run_id);
   React.useEffect(() => {
-    if (!analysisInProgress || !Number.isSafeInteger(id) || id <= 0) return;
+    if (!analysisInProgress || stopping || !Number.isSafeInteger(id) || id <= 0) return;
+    let active = true;
     const timer = window.setInterval(async () => {
       try {
-        syncTask(await blueTaskApi.get(id));
+        const value = await blueTaskApi.get(id);
+        if (active) syncTask(value);
       } catch {
         // A transient poll failure does not stop the server-side analysis.
       }
     }, 3000);
-    return () => window.clearInterval(timer);
-  }, [analysisInProgress, id, syncTask]);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [analysisInProgress, id, stopping, syncTask]);
 
   function formBody(): UpdateBlueTask {
     return {
@@ -134,7 +143,7 @@ function BlueTaskDetailInner() {
   }
 
   async function runAnalysis() {
-    if (!task || !caseID || analysisInProgress) return;
+    if (!task || !caseID || analysisInProgress || stopping) return;
     setRunning(true);
     try {
       await blueTaskApi.update(task.id, formBody());
@@ -145,6 +154,40 @@ function BlueTaskDetailInner() {
       toast.error(cause instanceof Error ? cause.message : copy.runFailed);
     } finally {
       setRunning(false);
+    }
+  }
+
+  async function stopAnalysis() {
+    if (!task || !analysisInProgress || stopping) return;
+    setStopping(true);
+    try {
+      syncTask(await blueTaskApi.stop(task.id));
+      toast.success(copy.stopped);
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 409) {
+        try {
+          syncTask(await blueTaskApi.get(task.id));
+          toast.info(copy.stopAlreadyFinished);
+        } catch (refreshCause) {
+          toast.error(refreshCause instanceof Error ? refreshCause.message : copy.stopFailed);
+        }
+      } else {
+        toast.error(cause instanceof Error ? cause.message : copy.stopFailed);
+      }
+    } finally {
+      setStopping(false);
+    }
+  }
+
+  async function downloadReport() {
+    if (!task) return;
+    setReporting(true);
+    try {
+      await downloadBlueTaskReport(task.id, locale);
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : blueReportButtonCopy(locale).failed);
+    } finally {
+      setReporting(false);
     }
   }
 
@@ -177,6 +220,7 @@ function BlueTaskDetailInner() {
 
   const caseName = cases.find((item) => item.id === task.case_id)?.title;
   const tabLabels = TAB_LABELS[locale];
+  const reportCopy = blueReportButtonCopy(locale);
 
   return (
     <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-0">
@@ -202,14 +246,37 @@ function BlueTaskDetailInner() {
             <span className="hidden sm:inline">{copy.refresh}</span>
           </Button>
           <Button
+            variant="outline"
             size="sm"
-            onClick={() => void runAnalysis()}
-            disabled={!caseID || running || saving || analysisInProgress || !title.trim()}
-            aria-label={running ? copy.running : copy.run}
+            onClick={() => void downloadReport()}
+            disabled={reporting}
+            aria-label={reportCopy.download}
           >
-            <Bot />
-            <span className="hidden sm:inline">{running ? copy.running : copy.run}</span>
+            <Download />
+            <span className="hidden sm:inline">{reporting ? reportCopy.downloading : reportCopy.download}</span>
           </Button>
+          {analysisInProgress ? (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => void stopAnalysis()}
+              disabled={stopping}
+              aria-label={stopping ? copy.stopping : copy.stop}
+            >
+              <Square />
+              <span className="hidden sm:inline">{stopping ? copy.stopping : copy.stop}</span>
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              onClick={() => void runAnalysis()}
+              disabled={!caseID || running || stopping || saving || !title.trim()}
+              aria-label={running ? copy.running : copy.run}
+            >
+              <Bot />
+              <span className="hidden sm:inline">{running ? copy.running : copy.run}</span>
+            </Button>
+          )}
         </div>
         <p className="truncate text-muted-foreground text-xs">{task.description || copy.description}</p>
         <div className="no-scrollbar min-w-0 overflow-x-auto">
@@ -255,23 +322,26 @@ function BlueTaskDetailInner() {
                   <div className="grid gap-4 sm:grid-cols-3">
                     <div className="space-y-1.5">
                       <Label htmlFor="blue-task-detail-case">{copy.case}</Label>
-                      <select
+                      <Input
                         id="blue-task-detail-case"
-                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        type="number"
+                        min="1"
+                        step="1"
+                        list="blue-task-detail-cases"
                         value={caseID}
-                        onChange={(event) => setCaseID(event.target.value)}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (!value || (/^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value))))
+                            setCaseID(value);
+                        }}
+                        placeholder={copy.noCase}
                         disabled={analysisInProgress}
-                      >
-                        <option value="">{copy.noCase}</option>
-                        {task.case_id && !cases.some((item) => item.id === task.case_id) && (
-                          <option value={task.case_id}>#{task.case_id}</option>
-                        )}
+                      />
+                      <datalist id="blue-task-detail-cases">
                         {cases.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            #{item.id} {item.title}
-                          </option>
+                          <option key={item.id} value={item.id} label={item.title} />
                         ))}
-                      </select>
+                      </datalist>
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="blue-task-detail-priority">{copy.priority}</Label>
@@ -353,14 +423,21 @@ function BlueTaskDetailInner() {
                   {copy.completedAt}: {blueDate(task.completed_at, locale)}
                 </p>
               )}
-              <Button
-                size="sm"
-                onClick={() => void runAnalysis()}
-                disabled={!caseID || running || saving || analysisInProgress || !title.trim()}
-              >
-                <Bot />
-                {running ? copy.running : copy.run}
-              </Button>
+              {analysisInProgress ? (
+                <Button variant="destructive" size="sm" onClick={() => void stopAnalysis()} disabled={stopping}>
+                  <Square />
+                  {stopping ? copy.stopping : copy.stop}
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={() => void runAnalysis()}
+                  disabled={!caseID || running || stopping || saving || !title.trim()}
+                >
+                  <Bot />
+                  {running ? copy.running : copy.run}
+                </Button>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

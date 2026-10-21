@@ -173,11 +173,37 @@ func TestBlueAPIInvestigationWorkflowPG(t *testing.T) {
 	}
 	eventIDs = []int64{matchID, otherID}
 
+	// A bounded manual pass must inspect the newest event first and expose a
+	// cursor for older evidence instead of silently stopping at its limit.
+	var recentPage struct {
+		MatchedCount int   `json:"matched_count"`
+		ScannedCount int   `json:"scanned_count"`
+		HasMore      bool  `json:"has_more"`
+		NextBeforeID int64 `json:"next_before_id"`
+	}
+	rulePath := fmt.Sprintf("/api/blue/rules/%d", ruleID)
+	blueAPIRequest(t, h, token, http.MethodPost, rulePath+"/test", map[string]int{"limit": 1}, http.StatusOK, &recentPage)
+	if recentPage.ScannedCount != 1 || recentPage.MatchedCount != 0 || !recentPage.HasMore || recentPage.NextBeforeID != otherID {
+		t.Fatalf("first bounded page must show newest event and continuation: %+v", recentPage)
+	}
+	var olderPage struct {
+		MatchedCount  int   `json:"matched_count"`
+		ScannedCount  int   `json:"scanned_count"`
+		CreatedAlerts int   `json:"created_alerts"`
+		NextBeforeID  int64 `json:"next_before_id"`
+	}
+	blueAPIRequest(t, h, token, http.MethodPost, rulePath+"/run",
+		map[string]any{"limit": 1, "before_id": recentPage.NextBeforeID}, http.StatusOK, &olderPage)
+	if olderPage.ScannedCount != 1 || olderPage.MatchedCount != 1 || olderPage.CreatedAlerts != 0 {
+		t.Fatalf("older page must reach matching event without duplicate alert: %+v", olderPage)
+	}
+	blueAPIRequest(t, h, token, http.MethodPost, rulePath+"/test",
+		map[string]any{"before_id": -1}, http.StatusBadRequest, nil)
+
 	var testRun struct {
 		MatchedCount int `json:"matched_count"`
 		ScannedCount int `json:"scanned_count"`
 	}
-	rulePath := fmt.Sprintf("/api/blue/rules/%d", ruleID)
 	blueAPIRequest(t, h, token, http.MethodPost, rulePath+"/test", map[string]int{"limit": 100}, http.StatusOK, &testRun)
 	if testRun.MatchedCount != 1 || testRun.ScannedCount < 2 {
 		t.Fatalf("rule dry run should match only imported failure: %+v", testRun)
@@ -415,9 +441,9 @@ func TestBlueAPIRedFindingHandoffAndConversationIsolationPG(t *testing.T) {
 		t.Fatalf("replayed handoff duplicated or overwrote case: first=%+v replay=%+v", linked, replay)
 	}
 
-	// The Blue analyst is only run by the case analysis workflow. A caller must
-	// not create a generic red-team conversation with this role, nor send a turn
-	// to a legacy/forged conversation that already names it.
+	// Blue analyst conversations have dedicated Blue routes. The generic Red
+	// conversation API must neither create one nor reveal an existing Blue
+	// conversation through its message endpoint.
 	blueAPIRequest(t, h, token, http.MethodPost, "/api/conversations",
 		map[string]any{"agent_key": "blue_analyst", "title": fixture}, http.StatusForbidden, nil)
 	forged, err := pg.CreateConversation("blue_analyst", fixture, nil)
@@ -427,7 +453,7 @@ func TestBlueAPIRedFindingHandoffAndConversationIsolationPG(t *testing.T) {
 	forgedConversationID = forged.ID
 	blueAPIRequest(t, h, token, http.MethodPost,
 		fmt.Sprintf("/api/conversations/%d/messages", forgedConversationID),
-		map[string]any{"message": "Bypass case analysis"}, http.StatusForbidden, nil)
+		map[string]any{"message": "Bypass case analysis"}, http.StatusNotFound, nil)
 	var recorded int
 	if err := pg.QueryRow(`SELECT count(*) FROM conversation_activities WHERE conversation_id=$1`,
 		forgedConversationID).Scan(&recorded); err != nil {

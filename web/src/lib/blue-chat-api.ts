@@ -41,7 +41,7 @@ export const blueChatApi = {
     blueRequest<MessagesPage>(`/conversations/${id}/messages?since=${since}`).then(messagePage),
   messageDetail: (id: number, seq: number) =>
     blueRequest<{ detail: string }>(`/conversations/${id}/messages/${seq}`).then((result) => result.detail ?? ""),
-  send: (id: number, message: string) =>
-    blueRequest<{ status: string }>(`/conversations/${id}/messages`, body("POST", { message })),
+  send: (id: number, message: string, caseID?: number | null) =>
+    blueRequest<{ status: string }>(`/conversations/${id}/messages`, body("POST", { message, case_id: caseID })),
   stop: (id: number) => blueRequest<{ status: string }>(`/conversations/${id}/stop`, body("POST", {})),
 };

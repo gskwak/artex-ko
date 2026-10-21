@@ -34,6 +34,7 @@ const eventLabels = {
     assignCase: "Connect to case",
     changeCase: "Change case",
     chooseCase: "Choose a case",
+    anyCaseID: "Enter any case ID, including older cases.",
     saveCaseLink: "Save case link",
     caseLinked: "Event and related alerts linked to the case.",
     caseMoveFailed: "Could not update the event's case.",
@@ -52,6 +53,7 @@ const eventLabels = {
     assignCase: "사건에 연결",
     changeCase: "사건 변경",
     chooseCase: "사건 선택",
+    anyCaseID: "오래된 사건도 ID를 입력해 연결할 수 있습니다.",
     saveCaseLink: "사건 연결 저장",
     caseLinked: "이벤트와 관련 경보를 사건에 연결했습니다.",
     caseMoveFailed: "이벤트의 사건 연결을 변경하지 못했습니다.",
@@ -69,6 +71,7 @@ const eventLabels = {
     assignCase: "关联案件",
     changeCase: "更改案件",
     chooseCase: "选择案件",
+    anyCaseID: "输入任意案件 ID，包括较早的案件。",
     saveCaseLink: "保存案件关联",
     caseLinked: "事件及相关告警已关联到案件。",
     caseMoveFailed: "无法更新事件所属案件。",
@@ -86,6 +89,7 @@ const eventLabels = {
     assignCase: "Vincular al caso",
     changeCase: "Cambiar de caso",
     chooseCase: "Elegir un caso",
+    anyCaseID: "Introduzca cualquier ID de caso, incluidos los antiguos.",
     saveCaseLink: "Guardar vínculo",
     caseLinked: "El evento y sus alertas relacionadas se vincularon al caso.",
     caseMoveFailed: "No se pudo actualizar el caso del evento.",
@@ -123,6 +127,8 @@ export default function BlueEventsPage() {
   const [sourceFilter, setSourceFilter] = React.useState("");
   const [severityFilter, setSeverityFilter] = React.useState<BlueSeverity | "">("");
   const [textFilter, setTextFilter] = React.useState("");
+  const [sourceQuery, setSourceQuery] = React.useState("");
+  const [textQuery, setTextQuery] = React.useState("");
   const [selectedEventID, setSelectedEventID] = React.useState<number | null>(null);
   const [cases, setCases] = React.useState<BlueCase[]>([]);
   const [casesLoaded, setCasesLoaded] = React.useState(false);
@@ -130,25 +136,46 @@ export default function BlueEventsPage() {
   const [casesError, setCasesError] = React.useState("");
   const [moveEventID, setMoveEventID] = React.useState<number | null>(null);
   const [targetCaseID, setTargetCaseID] = React.useState("");
+  const [targetCase, setTargetCase] = React.useState<BlueCase | null>(null);
+  const [caseChecking, setCaseChecking] = React.useState(false);
+  const [caseLookupError, setCaseLookupError] = React.useState("");
   const [movingEventID, setMovingEventID] = React.useState<number | null>(null);
   const [moveError, setMoveError] = React.useState("");
   const fileInput = React.useRef<HTMLInputElement>(null);
   const loadVersion = React.useRef(0);
 
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSourceQuery(sourceFilter.trim());
+      setTextQuery(textFilter.trim());
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [sourceFilter, textFilter]);
+
   const load = React.useCallback(async () => {
     const version = ++loadVersion.current;
     setLoading(true);
     setLoadingMore(false);
+    setEvents([]);
+    setHasMore(false);
+    setNextOffset(0);
     setError("");
     setPageError("");
     try {
-      const recent = await blueApi.events({ limit: PAGE_SIZE, offset: 0 });
+      const page = await blueApi.events({
+        q: textQuery,
+        source: sourceQuery,
+        severity: severityFilter || undefined,
+        limit: PAGE_SIZE + 1,
+        offset: 0,
+      });
       if (version !== loadVersion.current) return;
-      setHasMore(recent.length === PAGE_SIZE);
-      setNextOffset(recent.length);
+      setHasMore(page.length > PAGE_SIZE);
+      setNextOffset(Math.min(page.length, PAGE_SIZE));
+      const recent = page.slice(0, PAGE_SIZE);
       const linkedID = linkedEventID();
       setSelectedEventID(linkedID);
-      if (linkedID && !recent.some((event) => event.id === linkedID)) {
+      if (linkedID && !textQuery && !sourceQuery && !severityFilter && !recent.some((event) => event.id === linkedID)) {
         try {
           recent.unshift(await blueApi.getEvent(linkedID));
         } catch (cause) {
@@ -161,7 +188,7 @@ export default function BlueEventsPage() {
     } finally {
       if (version === loadVersion.current) setLoading(false);
     }
-  }, [copy.loadFailed]);
+  }, [copy.loadFailed, severityFilter, sourceQuery, textQuery]);
 
   const loadMore = React.useCallback(async () => {
     if (loading || loadingMore || !hasMore) return;
@@ -169,20 +196,26 @@ export default function BlueEventsPage() {
     setLoadingMore(true);
     setPageError("");
     try {
-      const next = await blueApi.events({ limit: PAGE_SIZE, offset: nextOffset });
+      const next = await blueApi.events({
+        q: textQuery,
+        source: sourceQuery,
+        severity: severityFilter || undefined,
+        limit: PAGE_SIZE + 1,
+        offset: nextOffset,
+      });
       if (version !== loadVersion.current) return;
       setEvents((current) => {
         const seen = new Set(current.map((event) => event.id));
-        return [...current, ...next.filter((event) => !seen.has(event.id))];
+        return [...current, ...next.slice(0, PAGE_SIZE).filter((event) => !seen.has(event.id))];
       });
-      setNextOffset(nextOffset + next.length);
-      setHasMore(next.length === PAGE_SIZE);
+      setNextOffset(nextOffset + Math.min(next.length, PAGE_SIZE));
+      setHasMore(next.length > PAGE_SIZE);
     } catch (cause) {
       if (version === loadVersion.current) setPageError(cause instanceof Error ? cause.message : copy.loadFailed);
     } finally {
       if (version === loadVersion.current) setLoadingMore(false);
     }
-  }, [copy.loadFailed, hasMore, loading, loadingMore, nextOffset]);
+  }, [copy.loadFailed, hasMore, loading, loadingMore, nextOffset, severityFilter, sourceQuery, textQuery]);
 
   React.useEffect(() => {
     void load();
@@ -257,6 +290,44 @@ export default function BlueEventsPage() {
     }
   }, [copy.loadFailed]);
 
+  React.useEffect(() => {
+    setTargetCase(null);
+    setCaseLookupError("");
+    if (moveEventID === null || !targetCaseID.trim()) {
+      setCaseChecking(false);
+      return;
+    }
+    if (
+      !/^\d+$/.test(targetCaseID.trim()) ||
+      !Number.isSafeInteger(Number(targetCaseID)) ||
+      Number(targetCaseID) <= 0
+    ) {
+      setCaseChecking(false);
+      setCaseLookupError(copy.caseNotFound);
+      return;
+    }
+    let active = true;
+    setCaseChecking(true);
+    const timer = window.setTimeout(() => {
+      blueApi
+        .getCase(Number(targetCaseID))
+        .then((item) => {
+          if (active) setTargetCase(item);
+        })
+        .catch((cause: unknown) => {
+          if (active)
+            setCaseLookupError(cause instanceof ApiError && cause.status === 404 ? copy.caseNotFound : copy.loadFailed);
+        })
+        .finally(() => {
+          if (active) setCaseChecking(false);
+        });
+    }, 200);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [copy.caseNotFound, copy.loadFailed, moveEventID, targetCaseID]);
+
   const openCaseMove = React.useCallback(
     (event: BlueEvent) => {
       if (moveEventID === event.id) {
@@ -265,6 +336,8 @@ export default function BlueEventsPage() {
       }
       setMoveEventID(event.id);
       setTargetCaseID(event.case_id ? String(event.case_id) : "");
+      setTargetCase(null);
+      setCaseLookupError("");
       setMoveError("");
       if (!casesLoaded && !casesLoading) void loadCases();
     },
@@ -274,7 +347,15 @@ export default function BlueEventsPage() {
   const moveToCase = React.useCallback(
     async (event: BlueEvent) => {
       const caseID = Number(targetCaseID);
-      if (!Number.isSafeInteger(caseID) || caseID <= 0 || caseID === event.case_id || movingEventID !== null) return;
+      if (
+        !targetCase ||
+        targetCase.id !== caseID ||
+        !Number.isSafeInteger(caseID) ||
+        caseID <= 0 ||
+        caseID === event.case_id ||
+        movingEventID !== null
+      )
+        return;
       setMovingEventID(event.id);
       setMoveError("");
       try {
@@ -292,21 +373,8 @@ export default function BlueEventsPage() {
         setMovingEventID(null);
       }
     },
-    [labels.caseLinked, labels.caseMoveConflict, labels.caseMoveFailed, movingEventID, targetCaseID],
+    [labels.caseLinked, labels.caseMoveConflict, labels.caseMoveFailed, movingEventID, targetCase, targetCaseID],
   );
-
-  const sources = Array.from(new Set(events.map((event) => event.source))).sort();
-  const filtered = events.filter((event) => {
-    if (sourceFilter && event.source !== sourceFilter) return false;
-    if (severityFilter && event.severity !== severityFilter) return false;
-    const query = textFilter.trim().toLowerCase();
-    return (
-      !query ||
-      [event.message, event.asset, event.event_type, String(event.id)].some((value) =>
-        value.toLowerCase().includes(query),
-      )
-    );
-  });
 
   return (
     <div className="space-y-5">
@@ -421,19 +489,13 @@ export default function BlueEventsPage() {
           aria-label={copy.message}
           className="max-w-sm"
         />
-        <select
+        <Input
           value={sourceFilter}
           onChange={(event) => setSourceFilter(event.target.value)}
           aria-label={copy.filterSource}
-          className="h-8 rounded-lg border border-input bg-background px-2.5 text-sm"
-        >
-          <option value="">{copy.allSources}</option>
-          {sources.map((source) => (
-            <option key={source} value={source}>
-              {source}
-            </option>
-          ))}
-        </select>
+          placeholder={copy.filterSource}
+          className="max-w-48"
+        />
         <select
           value={severityFilter}
           onChange={(event) => setSeverityFilter(event.target.value as BlueSeverity | "")}
@@ -448,14 +510,16 @@ export default function BlueEventsPage() {
           ))}
         </select>
         <span className="text-xs text-muted-foreground">
-          {filtered.length.toLocaleString()} / {events.length.toLocaleString()}
+          {events.length.toLocaleString(locale)}
+          {hasMore ? "+" : ""}
         </span>
       </div>
       {error && <BlueError message={error} retry={() => void load()} retryLabel={copy.refresh} />}
       {loading && events.length === 0 && <BlueLoading label={copy.loading} />}
-      {!loading && !error && events.length === 0 && <BlueEmpty message={copy.noEvents} />}
-      {events.length > 0 && filtered.length === 0 && <BlueEmpty message={copy.noData} />}
-      {filtered.length > 0 && (
+      {!loading && !error && events.length === 0 && (
+        <BlueEmpty message={textQuery || sourceQuery || severityFilter ? copy.noData : copy.noEvents} />
+      )}
+      {events.length > 0 && (
         <Card>
           <CardContent className="p-0">
             <Table>
@@ -472,7 +536,7 @@ export default function BlueEventsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((event) => (
+                {events.map((event) => (
                   <TableRow
                     key={event.id}
                     id={`blue-event-${event.id}`}
@@ -531,50 +595,56 @@ export default function BlueEventsPage() {
                                 </Button>
                               </div>
                             )}
-                            {casesLoaded && !casesLoading && !casesError && (
-                              <>
-                                {cases.length === 0 ? (
-                                  <p className="text-muted-foreground text-xs">{labels.noCases}</p>
-                                ) : (
-                                  <>
-                                    <label htmlFor={`blue-event-case-${event.id}`} className="sr-only">
-                                      {labels.chooseCase}
-                                    </label>
-                                    <select
-                                      id={`blue-event-case-${event.id}`}
-                                      value={targetCaseID}
-                                      onChange={(selection) => setTargetCaseID(selection.target.value)}
-                                      disabled={movingEventID === event.id}
-                                      className="h-8 w-full rounded-lg border border-input bg-background px-2 text-xs"
-                                    >
-                                      <option value="">{labels.chooseCase}</option>
-                                      {cases.map((caseItem) => (
-                                        <option key={caseItem.id} value={caseItem.id}>
-                                          #{caseItem.id} {caseItem.title}
-                                        </option>
-                                      ))}
-                                    </select>
-                                    <Button
-                                      size="sm"
-                                      onClick={() => void moveToCase(event)}
-                                      disabled={
-                                        !targetCaseID ||
-                                        Number(targetCaseID) === event.case_id ||
-                                        movingEventID !== null
-                                      }
-                                    >
-                                      {movingEventID === event.id ? copy.loading : labels.saveCaseLink}
-                                    </Button>
-                                  </>
-                                )}
-                                <Link
-                                  className="block text-primary text-xs underline-offset-4 hover:underline"
-                                  href="/blue/cases"
-                                >
-                                  {labels.createCase}
-                                </Link>
-                              </>
+                            {casesLoaded && cases.length === 0 && (
+                              <p className="text-muted-foreground text-xs">{labels.noCases}</p>
                             )}
+                            <label htmlFor={`blue-event-case-${event.id}`} className="sr-only">
+                              {labels.chooseCase}
+                            </label>
+                            <Input
+                              id={`blue-event-case-${event.id}`}
+                              value={targetCaseID}
+                              onChange={(selection) => setTargetCaseID(selection.target.value)}
+                              disabled={movingEventID === event.id}
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              list={`blue-event-case-options-${event.id}`}
+                              placeholder={copy.caseID}
+                              className="h-8 text-xs"
+                            />
+                            <datalist id={`blue-event-case-options-${event.id}`}>
+                              {cases.map((caseItem) => (
+                                <option key={caseItem.id} value={caseItem.id} label={caseItem.title} />
+                              ))}
+                            </datalist>
+                            <p className="text-muted-foreground text-xs">{labels.anyCaseID}</p>
+                            {caseChecking && <p className="text-muted-foreground text-xs">{copy.loading}</p>}
+                            {caseLookupError && <p className="text-destructive text-xs">{caseLookupError}</p>}
+                            {targetCase && targetCase.id === Number(targetCaseID) && (
+                              <Link
+                                className="block text-primary text-xs underline-offset-4 hover:underline"
+                                href={`/blue/cases/detail?id=${targetCase.id}`}
+                              >
+                                #{targetCase.id} {targetCase.title}
+                              </Link>
+                            )}
+                            <Button
+                              size="sm"
+                              onClick={() => void moveToCase(event)}
+                              disabled={
+                                targetCase?.id !== Number(targetCaseID) ||
+                                Number(targetCaseID) === event.case_id ||
+                                movingEventID !== null
+                              }
+                            >
+                              {movingEventID === event.id ? copy.loading : labels.saveCaseLink}
+                            </Button>
+                            <Link
+                              className="block text-primary text-xs underline-offset-4 hover:underline"
+                              href="/blue/cases"
+                            >
+                              {labels.createCase}
+                            </Link>
                             {moveError && (
                               <p role="alert" className="text-destructive text-xs">
                                 {moveError}

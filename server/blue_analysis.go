@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -38,7 +39,7 @@ func (s *Server) blueAnalyzeCase(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, status, message)
 		return
 	}
-	go s.runBlueAnalysis(pg, job.run, job.provider, job.maxTokens, job.strategy, job.input)
+	s.startBlueAnalysis(pg, job)
 	writeJSON(w, http.StatusAccepted, map[string]any{"run": &job.run})
 }
 
@@ -51,6 +52,41 @@ type bluePreparedAnalysis struct {
 	maxTokens int
 	strategy  string
 	input     analysis.Input
+}
+
+// Register cancellation before starting the worker. This closes the gap where
+// a stop request could arrive after the queued response but before the model
+// goroutine began.
+func (s *Server) startBlueAnalysis(pg *db.DB, job *bluePreparedAnalysis) {
+	parent := s.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, blueAnalysisTimeout)
+	s.blueAnalysisMu.Lock()
+	if s.blueAnalysisCancel == nil {
+		s.blueAnalysisCancel = make(map[int64]context.CancelFunc)
+	}
+	s.blueAnalysisCancel[job.run.ID] = cancel
+	s.blueAnalysisMu.Unlock()
+	go func() {
+		defer func() {
+			s.blueAnalysisMu.Lock()
+			delete(s.blueAnalysisCancel, job.run.ID)
+			s.blueAnalysisMu.Unlock()
+			cancel()
+		}()
+		s.runBlueAnalysis(ctx, pg, job.run, job.provider, job.maxTokens, job.strategy, job.input)
+	}()
+}
+
+func (s *Server) cancelBlueAnalysis(id int64) {
+	s.blueAnalysisMu.Lock()
+	cancel := s.blueAnalysisCancel[id]
+	s.blueAnalysisMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func (s *Server) prepareBlueCaseAnalysis(ctx context.Context, pg *db.DB, caseID int64) (*bluePreparedAnalysis, int, string) {
@@ -163,7 +199,7 @@ func blueAnalysisInput(ctx context.Context, pg *db.DB, item *db.BlueCase) (analy
 	return in, nil
 }
 
-func (s *Server) runBlueAnalysis(pg *db.DB, run db.BlueAnalysisRun, prov llm.Provider, maxTokens int, strategy string, in analysis.Input) {
+func (s *Server) runBlueAnalysis(ctx context.Context, pg *db.DB, run db.BlueAnalysisRun, prov llm.Provider, maxTokens int, strategy string, in analysis.Input) {
 	defer func() { <-blueAnalysisSlots }()
 	defer func() {
 		if failure := recover(); failure != nil {
@@ -175,17 +211,17 @@ func (s *Server) runBlueAnalysis(pg *db.DB, run db.BlueAnalysisRun, prov llm.Pro
 		log.Printf("[blue] start analysis run %d: %v", run.ID, err)
 		return
 	}
-	parent := s.ctx
-	if parent == nil {
-		parent = context.Background()
-	}
-	ctx, cancel := context.WithTimeout(parent, blueAnalysisTimeout)
-	defer cancel()
 	ctx = transcript.WithSessionID(ctx, "blue-case-"+strconv.FormatInt(run.CaseID, 10)+"-analysis-"+strconv.FormatInt(run.ID, 10))
 	assessment, err := analysis.AnalyzeWithPrompt(ctx, prov, strategy, in, maxTokens)
 	if err != nil {
 		log.Printf("[blue] analysis run %d failed: %v", run.ID, err)
 		_, _ = s.blueUpdateRun(pg, run.ID, "failed", nil, "model response failed or did not pass evidence validation")
+		return
+	}
+	if ctx.Err() != nil {
+		// Some providers may return a final response despite cancellation. Never
+		// persist it after the user has stopped the run.
+		_, _ = s.blueUpdateRun(pg, run.ID, "failed", nil, "analysis stopped before completion")
 		return
 	}
 	eventIDs, alertIDs := assessment.EvidenceIDs()
@@ -203,10 +239,15 @@ func (s *Server) runBlueAnalysis(pg *db.DB, run db.BlueAnalysisRun, prov llm.Pro
 		primaryAlert = &alertIDs[0]
 	}
 	storeCtx, done := context.WithTimeout(context.Background(), blueAnalysisDBTime)
+	summary, detail := assessment.Summary, assessment.Markdown()
+	if in.Task != nil {
+		summary = assessment.TaskOutcome.Summary
+		detail = fmt.Sprintf("Task #%d: %s\n\n%s", in.Task.ID, in.Task.Title, detail)
+	}
 	obs, err := pg.CreateBlueObservation(storeCtx, db.BlueObservation{
 		CaseID: run.CaseID, EventID: primaryEvent, AlertID: primaryAlert,
 		EvidenceEventIDs: eventIDs, EvidenceAlertIDs: alertIDs,
-		Kind: "analysis", Summary: assessment.Summary, Detail: assessment.Markdown(),
+		Kind: "analysis", Summary: summary, Detail: detail,
 		Assessment: assessmentJSON, Author: "blue_analyst",
 	})
 	done()
@@ -217,6 +258,11 @@ func (s *Server) runBlueAnalysis(pg *db.DB, run db.BlueAnalysisRun, prov llm.Pro
 	}
 	if _, err := s.blueUpdateRun(pg, run.ID, "completed", &obs.ID, ""); err != nil {
 		log.Printf("[blue] complete analysis run %d: %v", run.ID, err)
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), blueAnalysisDBTime)
+		if cleanupErr := pg.DeleteUnattachedBlueAnalysisObservation(cleanupCtx, obs.ID); cleanupErr != nil {
+			log.Printf("[blue] clean up incomplete analysis observation %d: %v", obs.ID, cleanupErr)
+		}
+		cancel()
 	}
 }
 

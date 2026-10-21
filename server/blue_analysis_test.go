@@ -17,9 +17,10 @@ import (
 )
 
 type heldBlueProvider struct {
-	started chan struct{}
-	release chan struct{}
-	output  string
+	started  chan struct{}
+	release  chan struct{}
+	captured chan llm.CompletionRequest
+	output   string
 }
 
 func (p *heldBlueProvider) Stream(context.Context, llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
@@ -29,6 +30,9 @@ func (p *heldBlueProvider) Stream(context.Context, llm.CompletionRequest) iter.S
 func (p *heldBlueProvider) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
 	if len(req.Tools) != 0 {
 		return llm.Message{}, "", llm.Usage{}, fmt.Errorf("blue analyst received %d tools", len(req.Tools))
+	}
+	if p.captured != nil {
+		p.captured <- req
 	}
 	close(p.started)
 	select {

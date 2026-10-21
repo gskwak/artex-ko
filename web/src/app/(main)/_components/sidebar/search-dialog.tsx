@@ -35,40 +35,8 @@ type SearchItem = {
   searchOnly?: boolean;
 };
 
-// These screens remain directly searchable after their sidebar links move into Investigation.
-const BLUE_INVESTIGATION_SEARCH_ITEMS: SearchItem[] = [
-  {
-    id: "blueCases",
-    headingKey: "group.function",
-    labelKey: "item.blueCases",
-    fallbackLabel: "Cases",
-    url: "/blue/cases",
-    searchOnly: true,
-  },
-  {
-    id: "blueEvents",
-    headingKey: "group.function",
-    labelKey: "item.blueEvents",
-    fallbackLabel: "Events",
-    url: "/blue/events",
-    searchOnly: true,
-  },
-  {
-    id: "blueTraffic",
-    headingKey: "group.function",
-    labelKey: "item.blueTraffic",
-    fallbackLabel: "Traffic",
-    url: "/blue/traffic",
-    searchOnly: true,
-  },
-  {
-    id: "blueDetection",
-    headingKey: "group.function",
-    labelKey: "item.blueDetection",
-    fallbackLabel: "Detection",
-    url: "/blue/detection",
-    searchOnly: true,
-  },
+// Detection's tabs remain directly searchable alongside the Investigation submenu.
+const BLUE_DETECTION_SEARCH_ITEMS: SearchItem[] = [
   {
     id: "blueAlerts",
     headingKey: "group.function",
@@ -83,14 +51,6 @@ const BLUE_INVESTIGATION_SEARCH_ITEMS: SearchItem[] = [
     labelKey: "item.blueRules",
     fallbackLabel: "Detection rules",
     url: "/blue/detection?tab=rules",
-    searchOnly: true,
-  },
-  {
-    id: "blueActions",
-    headingKey: "group.function",
-    labelKey: "item.blueActions",
-    fallbackLabel: "Response actions",
-    url: "/blue/actions",
     searchOnly: true,
   },
 ];
@@ -155,7 +115,7 @@ export function SearchDialog() {
   const { mode } = useTeamMode();
   const searchItems = [
     ...searchItemsFor(mode === "blue" ? blueSidebarItems : redSidebarItems),
-    ...(mode === "blue" ? BLUE_INVESTIGATION_SEARCH_ITEMS : []),
+    ...(mode === "blue" ? BLUE_DETECTION_SEARCH_ITEMS : []),
   ];
   const recommendations = getAvailableItems(searchItems).filter((item) => !item.searchOnly);
   const labelOf = (item: SearchItem) => (tNav.has(item.labelKey) ? tNav(item.labelKey) : item.fallbackLabel);

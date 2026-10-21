@@ -652,6 +652,14 @@ export interface Activity {
   detail?: string;
   metadata?: {
     llm_transition?: LLMTransition;
+    blue_case?: {
+      id: number;
+      title: string;
+      event_ids: number[];
+      alert_ids: number[];
+      events_truncated?: boolean;
+      alerts_truncated?: boolean;
+    };
   };
   source_task_id?: string;
   inherited?: boolean;

@@ -57,6 +57,8 @@ interface RuleRunResult {
   scanned_count: number;
   matches: RuleMatch[];
   created_alerts?: number;
+  has_more: boolean;
+  next_before_id?: number;
 }
 
 interface RuleForm {
@@ -202,6 +204,10 @@ const EN = {
   source: "Source",
   message: "Message",
   sampleLimited: "Showing the returned sample; the match count may be higher.",
+  newestFirst: "Stored events are scanned from newest to oldest.",
+  olderRemain: "Older events remain unscanned. Continue with earlier records; scan again for new imports.",
+  scanOlder: "Scan next older events",
+  batches: "Batches scanned",
   pendingRun: "Run evaluates stored events and creates deduplicated alerts for matches.",
   genericError: "An unexpected error occurred.",
 } as const;
@@ -273,6 +279,10 @@ const KO: Copy = {
   source: "출처",
   message: "메시지",
   sampleLimited: "반환된 일부 이벤트를 표시합니다. 전체 일치 건수는 더 많을 수 있습니다.",
+  newestFirst: "저장된 이벤트를 최신 순서부터 검사합니다.",
+  olderRemain: "아직 검사하지 않은 이전 이벤트가 있습니다. 이어서 검사하고, 새로 가져온 이벤트는 다시 실행하세요.",
+  scanOlder: "이전 이벤트 이어서 검사",
+  batches: "검사한 묶음",
   pendingRun: "실행하면 저장된 이벤트를 평가하고 일치 건에 대해 중복을 제거한 경보를 생성합니다.",
   genericError: "예상치 못한 오류가 발생했습니다.",
 };
@@ -340,6 +350,10 @@ const ZH: Copy = {
   source: "来源",
   message: "消息",
   sampleLimited: "仅显示返回的样本；匹配总数可能更多。",
+  newestFirst: "按从新到旧的顺序扫描已存储事件。",
+  olderRemain: "仍有较早的事件未扫描。继续检查旧记录；新导入的事件需重新运行。",
+  scanOlder: "继续扫描较早事件",
+  batches: "已扫描批次",
   pendingRun: "运行规则会评估已存储的事件，并为匹配项创建去重告警。",
   genericError: "发生意外错误。",
 };
@@ -411,6 +425,11 @@ const ES: Copy = {
   source: "Origen",
   message: "Mensaje",
   sampleLimited: "Se muestra la muestra devuelta; el total de coincidencias puede ser mayor.",
+  newestFirst: "Los eventos almacenados se examinan desde los más recientes hasta los más antiguos.",
+  olderRemain:
+    "Quedan eventos anteriores sin examinar. Continúa con ellos y vuelve a ejecutar para nuevas importaciones.",
+  scanOlder: "Examinar eventos anteriores",
+  batches: "Lotes examinados",
   pendingRun: "La ejecución evalúa eventos almacenados y crea alertas sin duplicados para las coincidencias.",
   genericError: "Se produjo un error inesperado.",
 };
@@ -449,9 +468,12 @@ export default function BlueRulesView({ embedded = false }: { embedded?: boolean
   const [saving, setSaving] = React.useState(false);
   const [workingId, setWorkingId] = React.useState<number | null>(null);
   const [scanLimit, setScanLimit] = React.useState(5000);
-  const [result, setResult] = React.useState<{ ruleId: number; mode: "test" | "run"; data: RuleRunResult } | null>(
-    null,
-  );
+  const [result, setResult] = React.useState<{
+    ruleId: number;
+    mode: "test" | "run";
+    batches: number;
+    data: RuleRunResult;
+  } | null>(null);
 
   const load = React.useCallback(async () => {
     const version = ++requestVersion.current;
@@ -563,6 +585,7 @@ export default function BlueRulesView({ embedded = false }: { embedded?: boolean
       }
       toast.success(t.saved);
       setEditorOpen(false);
+      setResult(null);
       await load();
     } catch (error) {
       toast.error(errorMessage(error, t.saveError));
@@ -586,20 +609,44 @@ export default function BlueRulesView({ embedded = false }: { embedded?: boolean
     }
   }
 
-  async function evaluate(rule: BlueRule, mode: "test" | "run") {
+  async function evaluate(rule: BlueRule, mode: "test" | "run", beforeId?: number) {
     setWorkingId(rule.id);
     try {
       const data = await blueRequest<RuleRunResult>(`/rules/${rule.id}/${mode}`, {
         method: "POST",
-        body: JSON.stringify({ limit: scanLimit }),
+        body: JSON.stringify({ limit: scanLimit, ...(beforeId ? { before_id: beforeId } : {}) }),
       });
-      setResult({ ruleId: rule.id, mode, data });
+      setResult((previous) => {
+        if (!beforeId || !previous || previous.ruleId !== rule.id || previous.mode !== mode) {
+          return { ruleId: rule.id, mode, batches: 1, data };
+        }
+        const seen = new Set(previous.data.matches.map((match) => match.event_id));
+        const additional = data.matches.filter((match) => !seen.has(match.event_id));
+        return {
+          ruleId: rule.id,
+          mode,
+          batches: previous.batches + 1,
+          data: {
+            ...data,
+            scanned_count: previous.data.scanned_count + data.scanned_count,
+            matched_count: previous.data.matched_count + data.matched_count,
+            created_alerts: (previous.data.created_alerts ?? 0) + (data.created_alerts ?? 0),
+            matches: [...previous.data.matches, ...additional].slice(0, 100),
+          },
+        };
+      });
       if (mode === "run") toast.success(`${t.runDone}: ${data.created_alerts ?? 0}`);
     } catch (error) {
       toast.error(errorMessage(error, mode === "test" ? t.testError : t.runError));
     } finally {
       setWorkingId(null);
     }
+  }
+
+  const resultRule = result ? rules.find((rule) => rule.id === result.ruleId) : undefined;
+  let olderButtonLabel = t.scanOlder;
+  if (workingId === result?.ruleId) {
+    olderButtonLabel = result?.mode === "test" ? t.testing : t.running;
   }
 
   return (
@@ -737,14 +784,15 @@ export default function BlueRulesView({ embedded = false }: { embedded?: boolean
         <Card>
           <CardHeader>
             <CardTitle className="text-base">
-              {t.results}: {rules.find((rule) => rule.id === result.ruleId)?.name ?? `#${result.ruleId}`}
+              {t.results}: {resultRule?.name ?? `#${result.ruleId}`}
             </CardTitle>
             <CardDescription>
               {result.mode === "test" ? t.testResult : `${t.runResult} ${result.data.created_alerts ?? 0}`} {t.scanned}:{" "}
-              {result.data.scanned_count}. {t.matches}: {result.data.matched_count}
+              {result.data.scanned_count}. {t.matches}: {result.data.matched_count}. {t.batches}: {result.batches}.
             </CardDescription>
           </CardHeader>
           <CardContent>
+            <p className="mb-3 text-muted-foreground text-xs">{t.newestFirst}</p>
             {result.data.matches.length === 0 ? (
               <p className="text-sm text-muted-foreground">{t.noMatches}</p>
             ) : (
@@ -774,6 +822,28 @@ export default function BlueRulesView({ embedded = false }: { embedded?: boolean
                 {result.data.matches.length < result.data.matched_count && (
                   <p className="text-xs text-muted-foreground">{t.sampleLimited}</p>
                 )}
+              </div>
+            )}
+            {result.data.has_more && (
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
+                <p className="text-muted-foreground text-sm">{t.olderRemain}</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={
+                    workingId !== null ||
+                    !result.data.next_before_id ||
+                    !resultRule ||
+                    (result.mode === "run" && !resultRule.enabled)
+                  }
+                  onClick={() => {
+                    if (resultRule && result.data.next_before_id) {
+                      void evaluate(resultRule, result.mode, result.data.next_before_id);
+                    }
+                  }}
+                >
+                  {olderButtonLabel}
+                </Button>
               </div>
             )}
           </CardContent>

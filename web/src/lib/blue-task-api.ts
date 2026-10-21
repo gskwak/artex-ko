@@ -34,11 +34,24 @@ export interface UpdateBlueTask {
   result?: string;
 }
 
-function queryString(query?: { status?: BlueTaskStatus; case_id?: number; limit?: number; offset?: number }): string {
+export interface BlueTaskListQuery {
+  q?: string;
+  status?: BlueTaskStatus;
+  case_id?: number;
+  sort?: "id" | "title" | "status" | "priority" | "updated";
+  order?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}
+
+function queryString(query?: BlueTaskListQuery): string {
   if (!query) return "";
   const params = new URLSearchParams();
+  if (query.q) params.set("q", query.q);
   if (query.status) params.set("status", query.status);
   if (query.case_id) params.set("case_id", String(query.case_id));
+  if (query.sort) params.set("sort", query.sort);
+  if (query.order) params.set("order", query.order);
   if (query.limit !== undefined) params.set("limit", String(query.limit));
   if (query.offset !== undefined) params.set("offset", String(query.offset));
   const value = params.toString();
@@ -46,8 +59,7 @@ function queryString(query?: { status?: BlueTaskStatus; case_id?: number; limit?
 }
 
 export const blueTaskApi = {
-  list: (query?: { status?: BlueTaskStatus; case_id?: number; limit?: number; offset?: number }) =>
-    blueRequest<BlueTask[]>(`/tasks${queryString(query)}`),
+  list: (query?: BlueTaskListQuery) => blueRequest<BlueTask[]>(`/tasks${queryString(query)}`),
   get: (id: number) => blueRequest<BlueTask>(`/tasks/${id}`),
   create: (body: CreateBlueTask) => blueRequest<BlueTask>("/tasks", { method: "POST", body: JSON.stringify(body) }),
   update: (id: number, body: UpdateBlueTask) =>
@@ -57,4 +69,5 @@ export const blueTaskApi = {
       method: "POST",
       body: JSON.stringify({}),
     }),
+  stop: (id: number) => blueRequest<BlueTask>(`/tasks/${id}/stop`, { method: "POST" }),
 };

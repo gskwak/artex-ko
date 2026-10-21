@@ -171,6 +171,68 @@ func TestBlueChatIsScopedAndToolFreePG(t *testing.T) {
 	if detail.Detail != "Defensive answer based on supplied context." {
 		t.Fatalf("blue chat detail mismatch: %q", detail.Detail)
 	}
+	caseItem, err := pg.CreateBlueCase(context.Background(), db.BlueCase{
+		Title: "Investigate lab request", Description: "Review the linked HTTP event", Status: "open", Severity: "medium",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherCase, err := pg.CreateBlueCase(context.Background(), db.BlueCase{
+		Title: "Separate private case", Description: "Do not attach these records", Status: "open", Severity: "medium",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	caseID, otherCaseID := caseItem.ID, otherCase.ID
+	imported, err := pg.ImportBlueEvents(context.Background(), []db.BlueEvent{
+		{CaseID: &caseID, Source: "blue-chat-test", EventType: "http", Severity: "medium",
+			Message: "GET /lab/grounded-event", OccurredAt: time.Now().UTC(), Raw: json.RawMessage(`{"method":"GET"}`)},
+		{CaseID: &otherCaseID, Source: "blue-chat-test", EventType: "http", Severity: "medium",
+			Message: "PRIVATE-OTHER-CASE-EVENT", OccurredAt: time.Now().UTC(), Raw: json.RawMessage(`{"method":"POST"}`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for _, event := range imported {
+			_, _ = pg.Exec(`DELETE FROM blue_events WHERE id=$1`, event.ID)
+		}
+		_, _ = pg.Exec(`DELETE FROM blue_cases WHERE id IN ($1,$2)`, caseID, otherCaseID)
+	})
+	blueAPIRequest(t, h, token, http.MethodPost, path+"/messages", map[string]any{"message": "Bad case", "case_id": -1}, http.StatusBadRequest, nil)
+	blueAPIRequest(t, h, token, http.MethodPost, path+"/messages", map[string]any{"message": "Missing case", "case_id": int64(9223372036854775807)}, http.StatusNotFound, nil)
+	blueAPIRequest(t, h, token, http.MethodPost, path+"/messages", map[string]any{"message": "Review this case", "case_id": caseID}, http.StatusAccepted, nil)
+	waitBlueChatIdle(t, h, token, path)
+	grounded := provider.snapshot()
+	if len(grounded) != 3 || len(grounded[2].Tools) != 0 {
+		t.Fatalf("grounded chat must complete without tools: %+v", grounded)
+	}
+	attachedText := ""
+	for _, message := range grounded[2].Messages {
+		attachedText += message.Text()
+	}
+	if !strings.Contains(attachedText, "GET /lab/grounded-event") || !strings.Contains(attachedText, "Review this case") ||
+		strings.Contains(attachedText, "PRIVATE-OTHER-CASE-EVENT") {
+		t.Fatalf("case evidence was missing or crossed case boundaries: %q", attachedText)
+	}
+	blueAPIRequest(t, h, token, http.MethodGet, path+"/messages", nil, http.StatusOK, &messages)
+	var attachedMetadata struct {
+		BlueCase struct {
+			ID       int64   `json:"id"`
+			EventIDs []int64 `json:"event_ids"`
+		} `json:"blue_case"`
+	}
+	for _, item := range messages.Items {
+		if item.Kind == "user" && item.Summary == "Review this case" {
+			if err := json.Unmarshal(item.Metadata, &attachedMetadata); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if attachedMetadata.BlueCase.ID != caseID || len(attachedMetadata.BlueCase.EventIDs) != 1 ||
+		attachedMetadata.BlueCase.EventIDs[0] != imported[0].ID {
+		t.Fatalf("chat evidence provenance not persisted: %+v", attachedMetadata)
+	}
 	provider.mu.Lock()
 	provider.toolCall = true
 	provider.mu.Unlock()

@@ -1,11 +1,13 @@
 package server
 
 import (
+	"database/sql"
 	"errors"
 	"log"
 	"net/http"
 	"strings"
 
+	"github.com/Autumn-27/artex/blue/analysis"
 	"github.com/Autumn-27/artex/db"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -73,7 +75,34 @@ func (s *Server) blueListTasks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := pg.ListBlueTasks(r.Context(), status, caseID, limit, offset)
+	priority := r.URL.Query().Get("priority")
+	if priority != "" && !validBlueTaskPriority(priority) {
+		writeErr(w, http.StatusBadRequest, "invalid task priority")
+		return
+	}
+	query, ok := blueSearchQuery(w, r)
+	if !ok {
+		return
+	}
+	sort := r.URL.Query().Get("sort")
+	if sort == "" {
+		sort = "updated"
+	}
+	switch sort {
+	case "id", "title", "status", "priority", "updated":
+	default:
+		writeErr(w, http.StatusBadRequest, "invalid task sort")
+		return
+	}
+	order := r.URL.Query().Get("order")
+	if order == "" {
+		order = "desc"
+	}
+	if order != "asc" && order != "desc" {
+		writeErr(w, http.StatusBadRequest, "invalid task order")
+		return
+	}
+	items, err := pg.SearchBlueTasks(r.Context(), status, priority, caseID, query, sort, order, limit, offset)
 	if err != nil {
 		blueInternal(w, err)
 		return
@@ -250,6 +279,54 @@ func (s *Server) blueRunTask(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	go s.runBlueAnalysis(pg, job.run, job.provider, job.maxTokens, job.strategy, job.input)
+	// AttachBlueTaskRun returns the task row that was actually claimed. Use that
+	// snapshot so a concurrent edit before the claim cannot change the requested
+	// focus without changing what the model receives.
+	job.input.Task = &analysis.Task{
+		ID: updated.ID, Title: updated.Title,
+		Description: updated.Description, Priority: updated.Priority,
+	}
+	s.startBlueAnalysis(pg, job)
 	writeJSON(w, http.StatusAccepted, map[string]any{"task": updated, "run": &job.run})
+}
+
+func (s *Server) blueStopTask(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	id, ok := blueID(w, r)
+	if !ok {
+		return
+	}
+	task, err := pg.GetBlueTask(r.Context(), id)
+	if err != nil {
+		blueInternal(w, err)
+		return
+	}
+	if task == nil {
+		writeErr(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if task.Status != "in_progress" || task.AnalysisRunID == nil {
+		writeErr(w, http.StatusConflict, "task has no active analysis")
+		return
+	}
+	// The database transition wins or loses atomically against completion. Only
+	// after it wins do we cancel the matching model request in this process.
+	if _, err := s.blueUpdateRun(pg, *task.AnalysisRunID, "failed", nil, "analysis stopped by user"); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeErr(w, http.StatusConflict, "analysis already finished")
+		} else {
+			blueInternal(w, err)
+		}
+		return
+	}
+	s.cancelBlueAnalysis(*task.AnalysisRunID)
+	updated, err := pg.GetBlueTask(r.Context(), id)
+	if err != nil {
+		blueInternal(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
 }
