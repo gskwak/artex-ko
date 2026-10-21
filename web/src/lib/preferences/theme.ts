@@ -1,52 +1,19 @@
-export const THEME_MODE_OPTIONS = [
-  { label: "Light", value: "light" },
-  { label: "Dark", value: "dark" },
-  { label: "System", value: "system" },
-] as const;
-
-export const THEME_MODE_VALUES = THEME_MODE_OPTIONS.map((o) => o.value);
+export const THEME_MODE_VALUES = ["light", "dark"] as const;
 export type ThemeMode = (typeof THEME_MODE_VALUES)[number];
-export type ResolvedThemeMode = "light" | "dark";
-
-// --- generated:themePresets:start ---
+export type ResolvedThemeMode = ThemeMode;
 
 export const THEME_PRESET_OPTIONS = [
-  {
-    label: "Default",
-    value: "default",
-    primary: {
-      light: "oklch(0.205 0 0)",
-      dark: "oklch(0.922 0 0)",
-    },
-  },
-  {
-    label: "Brutalist",
-    value: "brutalist",
-    primary: {
-      light: "oklch(0.6489 0.237 26.9728)",
-      dark: "oklch(0.7044 0.1872 23.1858)",
-    },
-  },
-  {
-    label: "Soft Pop",
-    value: "soft-pop",
-    primary: {
-      light: "oklch(0.5106 0.2301 276.9656)",
-      dark: "oklch(0.6801 0.1583 276.9349)",
-    },
-  },
-  {
-    label: "Tangerine",
-    value: "tangerine",
-    primary: {
-      light: "oklch(0.64 0.17 36.44)",
-      dark: "oklch(0.64 0.17 36.44)",
-    },
-  },
+  { value: "red", primary: { light: "#B51B2B", dark: "#C81E30" } },
+  { value: "blue", primary: { light: "#1E46B8", dark: "#2F5FDC" } },
+] as const;
+export const THEME_PRESET_VALUES = THEME_PRESET_OPTIONS.map((preset) => preset.value);
+export type ThemePreset = (typeof THEME_PRESET_VALUES)[number];
+
+export const THEME_VARIANTS = [
+  { value: "red-light", preset: "red", mode: "light", color: "#B51B2B" },
+  { value: "red-dark", preset: "red", mode: "dark", color: "#C81E30" },
+  { value: "blue-light", preset: "blue", mode: "light", color: "#1E46B8" },
+  { value: "blue-dark", preset: "blue", mode: "dark", color: "#2F5FDC" },
 ] as const;
 
-export const THEME_PRESET_VALUES = THEME_PRESET_OPTIONS.map((p) => p.value);
-
-export type ThemePreset = (typeof THEME_PRESET_OPTIONS)[number]["value"];
-
-// --- generated:themePresets:end ---
+export type ThemeVariant = (typeof THEME_VARIANTS)[number];

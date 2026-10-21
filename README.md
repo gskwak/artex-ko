@@ -147,6 +147,8 @@ docker compose up -d          # artex 이미지 + postgres 를 함께 기동
 
 **LLM:** `export ANTHROPIC_API_KEY=sk-...`(또는 `OPENAI_API_KEY`), 혹은 UI 의 "LLM 설정" 페이지에서 입력합니다. 선택 환경 변수로 `ARTEX_LLM_PROVIDER` / `ARTEX_LLM_MODEL` / `ARTEX_LLM_BASE_URL` / `ARTEX_LLM_PROXY` 를 둘 수 있습니다. 국산·오픈 모델을 쓰려면 OpenAI 호환 `ARTEX_LLM_BASE_URL` 을 지정하십시오.
 
+**구독 연결:** LLM 설정에서 ChatGPT 구독 또는 공식 Claude Code를 통한 Claude 구독 연결도 선택할 수 있습니다. 최초 로그인·모델 선택·API 키 방식과의 등록 절차 비교는 [구독 모델 연결 안내](docs/subscription-models.md)를 참고하세요.
+
 **동시성:** 작업마다 돌리는 worker 에이전트 수는 "시스템 설정"에서 조정합니다(기본값 3).
 
 **자주 쓰는 인자:** `./start.sh -addr :8787 -proxy :8788` 에서 `-addr` 는 프런트엔드와 API 를 열고, `-proxy` 는 트래픽 기록 프록시 포트입니다. `-addr` 의 기본값은 `127.0.0.1:8787`(로컬 접속만)이며, 다른 기기에서 접속하려면 `:8787` 처럼 바인딩 주소를 명시해야 합니다(아래 "초기 설정 보호" 참고).

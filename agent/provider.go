@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/llmrec"
+	"github.com/Autumn-27/artex/subscription"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/compaction"
 	"github.com/Autumn-27/norma/llm"
@@ -30,10 +31,11 @@ import (
 
 // Config describes the LLM backend resolved from the environment.
 type Config struct {
-	Format  llm.Format
-	BaseURL string
-	APIKey  string
-	Model   string
+	Subscriptions *subscription.Manager
+	Format        llm.Format
+	BaseURL       string
+	APIKey        string
+	Model         string
 	// Proxy routes all LLM requests through the given proxy URL (http/https/socks5,
 	// optionally with user:pass@ credentials). Empty means direct — it does NOT
 	// fall back to the standard *_PROXY environment variables.
@@ -211,6 +213,12 @@ func ConfigFrom(provider, model, baseURL, apiKey, proxy string) Config {
 		Stream:  true, // Stream by default; caller may override by profile.
 	}
 	switch strings.TrimSpace(provider) {
+	case "chatgpt", "claude-code":
+		c.Format = llm.Format(strings.TrimSpace(provider))
+		c.APIKey, c.BaseURL, c.Proxy = "", "", ""
+		if c.Model == "" && c.Format == "claude-code" {
+			c.Model = "sonnet"
+		}
 	case "openai":
 		c.Format = llm.FormatOpenAI
 		// provider appends "/chat/completions"; tolerate a full endpoint URL.
@@ -248,6 +256,9 @@ func isFalsy(s string) bool {
 
 // Provider returns the short provider name ("anthropic"/"openai").
 func (c Config) Provider() string {
+	if IsSubscription(string(c.Format)) {
+		return string(c.Format)
+	}
 	switch c.Format {
 	case llm.FormatOpenAI:
 		return "openai"
@@ -261,6 +272,15 @@ func (c Config) Provider() string {
 // limiter lives on the single provider instance — so planner + all workers +
 // main agent (which share this provider) are bounded by one shared rate limit.
 func (c Config) NewProvider() (llm.Provider, error) {
+	if IsSubscription(c.Provider()) {
+		if c.Subscriptions == nil {
+			return nil, fmt.Errorf("subscription connection manager is unavailable")
+		}
+		if c.Model == "" {
+			return nil, fmt.Errorf("select an available subscription model first")
+		}
+		return &subscriptionProvider{cfg: c, manager: c.Subscriptions, client: &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone(), CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	}
 	client, err := quotaAwareHTTPClient(c.Proxy, c.SessionHeaderKey)
 	if err != nil {
 		return nil, err
@@ -311,6 +331,7 @@ func IsQuotaExhaustedMessage(message string) bool {
 		return false
 	}
 	markers := []string{
+		"subscription_sharing_usage_limit_exceeded",
 		"insufficient_quota", "quota_exceeded", "quota exceeded", "quota exhausted",
 		"exceeded your current quota", "billing_hard_limit_reached",
 		"billing hard limit", "billing_not_active", "credit balance", "insufficient credit",
@@ -467,7 +488,11 @@ func TestConnection(ctx context.Context, c Config) (time.Duration, string, error
 	if err != nil {
 		return 0, "", err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	timeout := 30 * time.Second
+	if IsSubscription(c.Provider()) {
+		timeout = 2 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	// Capture raw wire responses: connection tests need the gateway's status
 	// and body, which norma discards after decoding StreamEvents.

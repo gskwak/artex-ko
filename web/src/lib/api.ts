@@ -971,6 +971,19 @@ export const api = {
       streaming,
       session_header_key,
     }),
+  subscriptionStatus: () =>
+    get<{
+      chatgpt: {
+        active: string;
+        accounts: { id: string; email: string; connected: boolean }[];
+        connected: boolean;
+        pending: boolean;
+        error?: string;
+      };
+      claude: { installed: boolean; connected: boolean; email?: string; auth_method?: string };
+    }>("/llm/subscriptions"),
+  subscriptionAction: (action: string, account_id = "") =>
+    post<{ ok?: boolean; url?: string; revoked?: boolean }>("/llm/subscriptions/chatgpt", { action, account_id }),
   llmProfiles: () => get<{ profiles: LLMProfile[] }>("/llm/profiles").then((r) => arr(r.profiles)),
   saveLLMProfile: (p: {
     id?: number; // omit/0 = create; set = update that profile

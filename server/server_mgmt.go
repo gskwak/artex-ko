@@ -1874,7 +1874,22 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	p := body.LLMProfile
 	p.APIKey = body.APIKey
-	p.Streaming = body.Streaming == nil || *body.Streaming
+	if agent.IsSubscription(p.Format) {
+		p.APIKey = ""
+		p.APIKeyHint = ""
+		p.BaseURL = ""
+		p.Proxy = ""
+		p.Streaming = true
+		p.MaxTokens = 0
+		p.RatePerSecond = 0
+		p.RatePerMinute = 0
+		p.SessionHeaderKey = ""
+		if p.Format == "claude-code" {
+			p.ThinkingType = ""
+			p.ReasoningEffort = ""
+		}
+	}
+	p.Streaming = agent.IsSubscription(p.Format) || body.Streaming == nil || *body.Streaming
 	// Output limit: negative values are meaningless, so reset them to zero (omit the field).
 	// Only Chat Completions uses a configurable field name. Anthropic and openai-responses
 	// use fixed names, so clear this setting for other formats. Clear unknown values too
@@ -2054,6 +2069,10 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decode(r, &req); err != nil {
 		writeErr(w, 400, err.Error())
+		return
+	}
+	if agent.IsSubscription(req.Provider) {
+		s.subscriptionModels(w, r, req.Provider)
 		return
 	}
 	// Resolve API key: form input > profile stored key.

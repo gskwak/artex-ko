@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 )
 
@@ -41,7 +42,7 @@ func (s *Server) resolutionFromProfile(p *db.LLMProfile, source string) taskLLMR
 		Model:     p.Model,
 		Source:    source,
 	}
-	if p.APIKey == "" {
+	if p.APIKey == "" && !agent.IsSubscription(p.Format) {
 		result.Reason = reasonLLMProfileNoAPIKey
 		return result
 	}

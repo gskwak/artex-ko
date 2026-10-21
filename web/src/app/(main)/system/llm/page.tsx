@@ -32,6 +32,7 @@ import type { LLMPoolMember, LLMPoolStatus, LLMProfile, LLMRetryOverride } from 
 import { cn } from "@/lib/utils";
 
 import { ProfileRetryFields, RetryPolicyPanel, ZERO_OVERRIDE } from "./_components/retry";
+import { SubscriptionConnections } from "./_components/subscriptions";
 
 // The thinking toggle (thinking.type) and thinking intensity (reasoning_effort) are independent fields.
 // Configure them separately: some APIs have no thinking field and enable thinking through intensity alone.
@@ -261,7 +262,9 @@ function ProfileSheet({
   const t = useTranslations("llmPage");
   const isNew = !profile;
   const [name, setName] = React.useState("");
-  const [format, setFormat] = React.useState<"anthropic" | "openai" | "openai-responses">("anthropic");
+  const [format, setFormat] = React.useState<LLMProfile["format"]>("anthropic");
+  const isSubscription = format === "chatgpt" || format === "claude-code";
+  const ts = useTranslations("llmSubscriptions");
   const [model, setModel] = React.useState("");
   const [baseUrl, setBaseUrl] = React.useState("");
   const [proxy, setProxy] = React.useState("");
@@ -310,7 +313,7 @@ function ProfileSheet({
   React.useEffect(() => {
     if (!open) return;
     setName(profile?.name ?? "");
-    setFormat(profile?.format === "openai" || profile?.format === "openai-responses" ? profile.format : "anthropic");
+    setFormat(profile?.format ?? "anthropic");
     setModel(profile?.model ?? "");
     setBaseUrl(profile?.base_url ?? "");
     setProxy(profile?.proxy ?? "");
@@ -398,9 +401,9 @@ function ProfileSheet({
         name: name.trim(),
         format,
         model: model.trim(),
-        base_url: baseUrl.trim(),
-        proxy: proxy.trim(),
-        api_key: apiKey,
+        base_url: isSubscription ? "" : baseUrl.trim(),
+        proxy: isSubscription ? "" : proxy.trim(),
+        api_key: isSubscription ? "" : apiKey,
         rate_per_second: Number(rps) || 0,
         rate_per_minute: Number(rpm) || 0,
         context_window_k: Number(cw) || 0,
@@ -408,8 +411,8 @@ function ProfileSheet({
         reasoning_effort: toStore(effort),
         priority: Number(priority) || 0,
         pool_exclude: poolExclude,
-        streaming,
-        max_tokens: Math.max(0, Number(maxTokens) || 0),
+        streaming: isSubscription || streaming,
+        max_tokens: isSubscription ? 0 : Math.max(0, Number(maxTokens) || 0),
         // The field-name option only applies to OpenAI Chat Completions. Other formats use the
         // default. The backend normalizes this too; this keeps the UI from sending conflicting values.
         max_tokens_field: format === "openai" ? toStore(maxTokensField) : "",
@@ -458,7 +461,7 @@ function ProfileSheet({
             </div>
             <div className="grid gap-2">
               <Label>{t("profile.format.label")}</Label>
-              <Select value={format} onValueChange={(v) => setFormat(v as "anthropic" | "openai" | "openai-responses")}>
+              <Select value={format} onValueChange={(v) => setFormat(v as LLMProfile["format"])}>
                 <SelectTrigger>
                   <SelectValue placeholder={t("profile.format.placeholder")} />
                 </SelectTrigger>
@@ -466,18 +469,21 @@ function ProfileSheet({
                   <SelectItem value="anthropic">Anthropic</SelectItem>
                   <SelectItem value="openai">OpenAI (Chat Completions)</SelectItem>
                   <SelectItem value="openai-responses">OpenAI (Responses API)</SelectItem>
+                  <SelectItem value="chatgpt">{ts("chatgptFormat")}</SelectItem>
+                  <SelectItem value="claude-code">{ts("claudeFormat")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
 
+          {isSubscription && <p className="rounded border p-3 text-sm">{ts("profileHint")}</p>}
           <div className="grid gap-2">
             <Label htmlFor="p-model">{t("profile.model.label")}</Label>
             <div className="flex gap-2">
               <Input
                 id="p-model"
                 className="font-mono"
-                placeholder="claude-opus-4-8"
+                placeholder={isSubscription ? ts("chooseModel") : "claude-opus-4-8"}
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               />
@@ -518,62 +524,79 @@ function ProfileSheet({
             </div>
           </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="p-base-url">{t("profile.baseUrl.label")}</Label>
-            <Input
-              id="p-base-url"
-              className="font-mono"
-              placeholder="https://api.openai.com/v1"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-            />
-          </div>
+          {!isSubscription && (
+            <>
+              <div className="grid gap-2">
+                <Label htmlFor="p-base-url">{t("profile.baseUrl.label")}</Label>
+                <Input
+                  id="p-base-url"
+                  className="font-mono"
+                  placeholder="https://api.openai.com/v1"
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                />
+              </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="p-proxy">{t("profile.proxy.label")}</Label>
-            <Input
-              id="p-proxy"
-              className="font-mono"
-              placeholder="socks5://user:pass@127.0.0.1:1080 · http://127.0.0.1:8080"
-              value={proxy}
-              onChange={(e) => setProxy(e.target.value)}
-            />
-            <p className="text-muted-foreground text-xs">{t("profile.proxy.hint")}</p>
-          </div>
+              <div className="grid gap-2">
+                <Label htmlFor="p-proxy">{t("profile.proxy.label")}</Label>
+                <Input
+                  id="p-proxy"
+                  className="font-mono"
+                  placeholder="socks5://user:pass@127.0.0.1:1080 · http://127.0.0.1:8080"
+                  value={proxy}
+                  onChange={(e) => setProxy(e.target.value)}
+                />
+                <p className="text-muted-foreground text-xs">{t("profile.proxy.hint")}</p>
+              </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="p-session-header">{t("profile.sessionHeader.label")}</Label>
-            <Input
-              id="p-session-header"
-              className="font-mono"
-              placeholder={t("profile.sessionHeader.placeholder")}
-              value={sessionHeaderKey}
-              onChange={(e) => setSessionHeaderKey(e.target.value)}
-            />
-            <p className="text-muted-foreground text-xs">
-              {t.rich("profile.sessionHeader.hint", { b: (c) => <b>{c}</b> })}
-            </p>
-          </div>
+              <div className="grid gap-2">
+                <Label htmlFor="p-session-header">{t("profile.sessionHeader.label")}</Label>
+                <Input
+                  id="p-session-header"
+                  className="font-mono"
+                  placeholder={t("profile.sessionHeader.placeholder")}
+                  value={sessionHeaderKey}
+                  onChange={(e) => setSessionHeaderKey(e.target.value)}
+                />
+                <p className="text-muted-foreground text-xs">
+                  {t.rich("profile.sessionHeader.hint", { b: (c) => <b>{c}</b> })}
+                </p>
+              </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="p-api-key">API Key</Label>
-            <Input
-              id="p-api-key"
-              type="password"
-              placeholder={keyHint ? t("profile.apiKey.placeholderSet", { hint: keyHint }) : "sk-…"}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-            />
-          </div>
-
+              <div className="grid gap-2">
+                <Label htmlFor="p-api-key">API Key</Label>
+                <Input
+                  id="p-api-key"
+                  type="password"
+                  placeholder={keyHint ? t("profile.apiKey.placeholderSet", { hint: keyHint }) : "sk-…"}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                />
+              </div>
+            </>
+          )}
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="grid gap-2">
               <Label htmlFor="p-rps">{t("profile.rps")}</Label>
-              <Input id="p-rps" type="number" min={0} value={rps} onChange={(e) => setRps(e.target.value)} />
+              <Input
+                id="p-rps"
+                disabled={isSubscription}
+                type="number"
+                min={0}
+                value={rps}
+                onChange={(e) => setRps(e.target.value)}
+              />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="p-rpm">{t("profile.rpm")}</Label>
-              <Input id="p-rpm" type="number" min={0} value={rpm} onChange={(e) => setRpm(e.target.value)} />
+              <Input
+                id="p-rpm"
+                disabled={isSubscription}
+                type="number"
+                min={0}
+                value={rpm}
+                onChange={(e) => setRpm(e.target.value)}
+              />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="p-cw">{t("profile.cw")}</Label>
@@ -618,7 +641,12 @@ function ProfileSheet({
                 <Label className="text-sm">{t("profile.streaming.label")}</Label>
                 <p className="text-muted-foreground text-xs">{t("profile.streaming.hint")}</p>
               </div>
-              <Switch checked={streaming} onCheckedChange={setStreaming} aria-label={t("profile.streaming.aria")} />
+              <Switch
+                disabled={isSubscription}
+                checked={isSubscription || streaming}
+                onCheckedChange={setStreaming}
+                aria-label={t("profile.streaming.aria")}
+              />
             </div>
           </div>
 
@@ -632,6 +660,7 @@ function ProfileSheet({
               </div>
               <Input
                 id="p-max-tokens"
+                disabled={isSubscription}
                 type="number"
                 min={0}
                 className="w-28 shrink-0"
@@ -670,7 +699,7 @@ function ProfileSheet({
                 <Label className="text-sm">{t("profile.thinkingType.label")}</Label>
                 <p className="text-muted-foreground text-xs">{t("profile.thinkingType.hint")}</p>
               </div>
-              <Select value={thinkingType} onValueChange={setThinkingType}>
+              <Select value={thinkingType} onValueChange={setThinkingType} disabled={format === "claude-code"}>
                 <SelectTrigger className="w-32 shrink-0">
                   <SelectValue />
                 </SelectTrigger>
@@ -688,7 +717,7 @@ function ProfileSheet({
                 <Label className="text-sm">{t("profile.effort.label")}</Label>
                 <p className="text-muted-foreground text-xs">{t("profile.effort.hint")}</p>
               </div>
-              <Select value={effort} onValueChange={setEffort}>
+              <Select value={effort} onValueChange={setEffort} disabled={format === "claude-code"}>
                 <SelectTrigger className="w-32 shrink-0">
                   <SelectValue />
                 </SelectTrigger>
@@ -741,6 +770,12 @@ export default function LLMPage() {
   // Card health status: report a missing key before circuit-breaker state because requests cannot be sent.
   const healthOf = React.useCallback(
     (p: LLMProfile, m?: LLMPoolMember): Health => {
+      if (p.format === "chatgpt" || p.format === "claude-code") {
+        return {
+          label: p.format === "chatgpt" ? "ChatGPT" : "Claude Code",
+          cls: "border-muted-foreground/40 text-muted-foreground",
+        };
+      }
       if (!p.api_key_hint) {
         return {
           label: t("health.noKey.label"),
@@ -853,6 +888,7 @@ export default function LLMPage() {
         </TabsList>
 
         <TabsContent value="profiles" className="mt-4">
+          <SubscriptionConnections />
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {profiles.map((p) => {
               const h = healthOf(p, health.get(p.id));

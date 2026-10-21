@@ -34,6 +34,8 @@ services:
       # ARTEX_ADMIN_PASSWORD 를 주면 /setup 없이 그 값으로 바로 초기화합니다(8자 이상).
       ARTEX_SETUP_TOKEN: ${ARTEX_SETUP_TOKEN:-}
       ARTEX_ADMIN_PASSWORD: ${ARTEX_ADMIN_PASSWORD:-}
+      ARTEX_CHATGPT_CALLBACK_ADDR: 0.0.0.0:1455
+      CLAUDE_CONFIG_DIR: /app/data/subscriptions/claude
       # 브라우저 교차 출처 허용 목록(쉼표 구분). 내장 UI 는 동일 출처라 보통 비워 둡니다.
       ARTEX_CORS_ORIGINS: ${ARTEX_CORS_ORIGINS:-}
       # 서버 쪽 기본 출력 언어(ko·en·zh·es). 비우면 한국어입니다. 에이전트 출력·오류 메시지는 설정 화면의
@@ -45,6 +47,7 @@ services:
       # 가능하면 README 의 리버스 프록시(HTTPS) 구성을 쓰십시오.
       - "${ARTEX_BIND:-127.0.0.1}:8787:8787"
       - "127.0.0.1:8788:8788"
+      - "127.0.0.1:1455:1455"
     volumes:
       # 데이터 디렉터리(jwt.key, SQLite 등 포함)를 프로젝트 루트의 data/ 에 바인드합니다.
       # 호스트에서 바로 확인·백업할 수 있고, 컨테이너를 다시 만들어도 사라지지 않습니다.
