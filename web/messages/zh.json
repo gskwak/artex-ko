@@ -3700,6 +3700,13 @@
       "hour": "{n} 小时"
     }
   },
+  "appearance": {
+    "theme": "主题",
+    "red-light": "红色 · 浅色",
+    "red-dark": "红色 · 深色",
+    "blue-light": "蓝色 · 浅色",
+    "blue-dark": "蓝色 · 深色"
+  },
   "llmSubscriptions": {
     "title": "Subscription connections",
     "refresh": "Refresh connection status",

@@ -12,7 +12,7 @@ import {
   SIDEBAR_VARIANT_VALUES,
 } from "@/lib/preferences/layout";
 import { THEME_MODE_VALUES, THEME_PRESET_VALUES } from "@/lib/preferences/theme";
-import { applyThemeMode, subscribeToSystemTheme } from "@/lib/preferences/theme-utils";
+import { applyThemeMode } from "@/lib/preferences/theme-utils";
 
 import { createPreferencesStore, type PreferencesState } from "./preferences-store";
 
@@ -82,19 +82,9 @@ export const PreferencesStoreProvider = ({
   }, [store]);
 
   useEffect(() => {
-    let unsubscribeMedia: (() => void) | undefined;
-
     const applyFromMode = (mode: PreferencesState["themeMode"]) => {
-      unsubscribeMedia?.();
       const resolved = applyThemeMode(mode);
       store.setState((prev) => ({ ...prev, resolvedThemeMode: resolved }));
-
-      if (mode === "system") {
-        unsubscribeMedia = subscribeToSystemTheme(() => {
-          const next = applyThemeMode("system");
-          store.setState((prev) => ({ ...prev, resolvedThemeMode: next }));
-        });
-      }
     };
 
     const startMode = domSnapshotRef.current?.themeMode ?? store.getState().themeMode;
@@ -105,7 +95,6 @@ export const PreferencesStoreProvider = ({
     });
 
     return () => {
-      unsubscribeMedia?.();
       unsubscribeStore();
     };
   }, [store]);

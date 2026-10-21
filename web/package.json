@@ -12,7 +12,6 @@
     "check": "biome check",
     "check:fix": "biome check --write",
     "prepare": "husky || true",
-    "generate:presets": "ts-node -P tsconfig.scripts.json src/scripts/generate-theme-presets.ts",
     "extract:i18n": "ts-node -P tsconfig.scripts.json src/scripts/extract-i18n.ts"
   },
   "lint-staged": {
@@ -41,7 +40,6 @@
     "lucide-react": "^1.22.0",
     "next": "^16.2.9",
     "next-intl": "^4.14.9",
-    "next-themes": "^0.4.6",
     "radix-ui": "^1.6.0",
     "react": "^19.2.7",
     "react-day-picker": "^10.0.1",

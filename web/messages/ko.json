@@ -3700,6 +3700,13 @@
       "hour": "{n}시간"
     }
   },
+  "appearance": {
+    "theme": "테마",
+    "red-light": "레드 · 라이트",
+    "red-dark": "레드 · 다크",
+    "blue-light": "블루 · 라이트",
+    "blue-dark": "블루 · 다크"
+  },
   "llmSubscriptions": {
     "title": "구독 서비스 연결",
     "refresh": "연결 상태 새로고침",

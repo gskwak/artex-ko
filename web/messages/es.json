@@ -3700,6 +3700,13 @@
       "hour": "{n} h"
     }
   },
+  "appearance": {
+    "theme": "Tema",
+    "red-light": "Rojo · Claro",
+    "red-dark": "Rojo · Oscuro",
+    "blue-light": "Azul · Claro",
+    "blue-dark": "Azul · Oscuro"
+  },
   "llmSubscriptions": {
     "title": "Subscription connections",
     "refresh": "Refresh connection status",

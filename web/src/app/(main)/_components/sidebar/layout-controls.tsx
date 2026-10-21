@@ -1,6 +1,7 @@
 "use client";
 
 import { Settings } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -18,13 +19,13 @@ import {
 } from "@/lib/preferences/layout-utils";
 import { PREFERENCE_DEFAULTS } from "@/lib/preferences/preferences-config";
 import { persistPreference } from "@/lib/preferences/preferences-storage";
-import { THEME_PRESET_OPTIONS, type ThemeMode, type ThemePreset } from "@/lib/preferences/theme";
-import { applyThemePreset } from "@/lib/preferences/theme-utils";
+import { THEME_VARIANTS } from "@/lib/preferences/theme";
+import { applyThemeMode, applyThemePreset } from "@/lib/preferences/theme-utils";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
 export function LayoutControls() {
+  const t = useTranslations("appearance");
   const themeMode = usePreferencesStore((s) => s.themeMode);
-  const resolvedThemeMode = usePreferencesStore((s) => s.resolvedThemeMode);
   const setThemeMode = usePreferencesStore((s) => s.setThemeMode);
   const themePreset = usePreferencesStore((s) => s.themePreset);
   const setThemePreset = usePreferencesStore((s) => s.setThemePreset);
@@ -39,16 +40,15 @@ export function LayoutControls() {
   const font = usePreferencesStore((s) => s.font);
   const setFont = usePreferencesStore((s) => s.setFont);
 
-  const onThemePresetChange = (preset: ThemePreset) => {
-    applyThemePreset(preset);
-    setThemePreset(preset);
-    void persistPreference("theme_preset", preset);
-  };
-
-  const onThemeModeChange = (mode: ThemeMode | "") => {
-    if (!mode) return;
-    setThemeMode(mode);
-    void persistPreference("theme_mode", mode);
+  const onThemeVariantChange = (value: string) => {
+    const selected = THEME_VARIANTS.find((variant) => variant.value === value);
+    if (!selected) return;
+    applyThemePreset(selected.preset);
+    applyThemeMode(selected.mode);
+    setThemePreset(selected.preset);
+    setThemeMode(selected.mode);
+    void persistPreference("theme_preset", selected.preset);
+    void persistPreference("theme_mode", selected.mode);
   };
 
   const onContentLayoutChange = (layout: ContentLayout | "") => {
@@ -87,8 +87,7 @@ export function LayoutControls() {
   };
 
   const handleRestore = () => {
-    onThemePresetChange(PREFERENCE_DEFAULTS.theme_preset);
-    onThemeModeChange(PREFERENCE_DEFAULTS.theme_mode);
+    onThemeVariantChange(`${PREFERENCE_DEFAULTS.theme_preset}-${PREFERENCE_DEFAULTS.theme_mode}`);
     onContentLayoutChange(PREFERENCE_DEFAULTS.content_layout);
     onNavbarStyleChange(PREFERENCE_DEFAULTS.navbar_style);
     onSidebarStyleChange(PREFERENCE_DEFAULTS.sidebar_variant);
@@ -111,23 +110,17 @@ export function LayoutControls() {
           </div>
           <div className="space-y-3 **:data-[slot=toggle-group]:w-full **:data-[slot=toggle-group-item]:flex-1 **:data-[slot=toggle-group-item]:text-xs">
             <div className="space-y-1">
-              <Label className="font-medium text-xs">Theme Preset</Label>
-              <Select value={themePreset} onValueChange={onThemePresetChange}>
+              <Label className="font-medium text-xs">{t("theme")}</Label>
+              <Select value={`${themePreset}-${themeMode}`} onValueChange={onThemeVariantChange}>
                 <SelectTrigger size="sm" className="w-full text-xs">
-                  <SelectValue placeholder="Preset" />
+                  <SelectValue placeholder={t("theme")} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    {THEME_PRESET_OPTIONS.map((preset) => (
-                      <SelectItem key={preset.value} className="text-xs" value={preset.value}>
-                        <span
-                          className="size-2.5 rounded-full"
-                          style={{
-                            backgroundColor:
-                              (resolvedThemeMode ?? "light") === "dark" ? preset.primary.dark : preset.primary.light,
-                          }}
-                        />
-                        {preset.label}
+                    {THEME_VARIANTS.map((theme) => (
+                      <SelectItem key={theme.value} className="text-xs" value={theme.value}>
+                        <span className="size-2.5 rounded-full" style={{ backgroundColor: theme.color }} />
+                        {t(theme.value)}
                       </SelectItem>
                     ))}
                   </SelectGroup>
@@ -151,28 +144,6 @@ export function LayoutControls() {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-            </div>
-
-            <div className="space-y-1">
-              <Label className="font-medium text-xs">Theme Mode</Label>
-              <ToggleGroup
-                size="sm"
-                spacing={0}
-                variant="outline"
-                type="single"
-                value={themeMode}
-                onValueChange={onThemeModeChange}
-              >
-                <ToggleGroupItem value="light" aria-label="Toggle light">
-                  Light
-                </ToggleGroupItem>
-                <ToggleGroupItem value="dark" aria-label="Toggle dark">
-                  Dark
-                </ToggleGroupItem>
-                <ToggleGroupItem value="system" aria-label="Toggle system">
-                  System
-                </ToggleGroupItem>
-              </ToggleGroup>
             </div>
 
             <div className="space-y-1">

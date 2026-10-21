@@ -1,35 +1,58 @@
 "use client";
 
-import { Monitor, Moon, Sun } from "lucide-react";
+import { Palette } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { persistPreference } from "@/lib/preferences/preferences-storage";
+import { THEME_VARIANTS } from "@/lib/preferences/theme";
+import { applyThemeMode, applyThemePreset } from "@/lib/preferences/theme-utils";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
-const THEME_CYCLE = ["light", "dark", "system"] as const;
-
 export function ThemeSwitcher() {
+  const t = useTranslations("appearance");
   const themeMode = usePreferencesStore((s) => s.themeMode);
+  const themePreset = usePreferencesStore((s) => s.themePreset);
   const setThemeMode = usePreferencesStore((s) => s.setThemeMode);
+  const setThemePreset = usePreferencesStore((s) => s.setThemePreset);
 
-  const cycleTheme = () => {
-    const currentIndex = THEME_CYCLE.indexOf(themeMode);
-    const nextTheme = THEME_CYCLE[(currentIndex + 1) % THEME_CYCLE.length];
-
-    setThemeMode(nextTheme);
-    void persistPreference("theme_mode", nextTheme);
+  const selectTheme = (value: string) => {
+    const selected = THEME_VARIANTS.find((theme) => theme.value === value);
+    if (!selected) return;
+    applyThemePreset(selected.preset);
+    applyThemeMode(selected.mode);
+    setThemePreset(selected.preset);
+    setThemeMode(selected.mode);
+    void persistPreference("theme_preset", selected.preset);
+    void persistPreference("theme_mode", selected.mode);
   };
 
   return (
-    <Button size="icon" onClick={cycleTheme} aria-label={`Current theme: ${themeMode}. Click to cycle themes`}>
-      {/* SYSTEM */}
-      <Monitor className="hidden [html[data-theme-mode=system]_&]:block" />
-
-      {/* DARK (resolved) */}
-      <Sun className="hidden dark:block [html[data-theme-mode=system]_&]:hidden" />
-
-      {/* LIGHT (resolved) */}
-      <Moon className="block dark:hidden [html[data-theme-mode=system]_&]:hidden" />
-    </Button>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="icon" aria-label={t("theme")} title={t("theme")}>
+          <Palette />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-44">
+        <DropdownMenuLabel>{t("theme")}</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={`${themePreset}-${themeMode}`} onValueChange={selectTheme}>
+          {THEME_VARIANTS.map((theme) => (
+            <DropdownMenuRadioItem key={theme.value} value={theme.value}>
+              <span className="size-3 rounded-full" style={{ backgroundColor: theme.color }} />
+              {t(theme.value)}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
