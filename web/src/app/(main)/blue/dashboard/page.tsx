@@ -58,9 +58,14 @@ export default function BlueDashboardPage() {
   const metrics = overview
     ? [
         { label: copy.openCases, value: overview.open_case_count, icon: ClipboardList, href: "/blue/cases" },
-        { label: copy.newAlerts, value: overview.new_alert_count, icon: Bell, href: "/blue/alerts" },
+        { label: copy.newAlerts, value: overview.new_alert_count, icon: Bell, href: "/blue/detection?tab=alerts" },
         { label: copy.totalEvents, value: overview.event_count, icon: Activity, href: "/blue/events" },
-        { label: copy.detectionRules, value: overview.rule_count, icon: ShieldCheck, href: "/blue/rules" },
+        {
+          label: copy.detectionRules,
+          value: overview.rule_count,
+          icon: ShieldCheck,
+          href: "/blue/detection?tab=rules",
+        },
         {
           label: copy.pendingActions,
           value: overview.pending_action_count,
@@ -145,7 +150,7 @@ export default function BlueDashboardPage() {
               <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
                 <CardTitle className="text-base">{copy.recentAlerts}</CardTitle>
                 <Button asChild variant="ghost" size="sm">
-                  <Link href="/blue/alerts">
+                  <Link href="/blue/detection?tab=alerts">
                     {copy.viewAll}
                     <ArrowRight />
                   </Link>
@@ -158,7 +163,7 @@ export default function BlueDashboardPage() {
                   alerts.map((item) => (
                     <Link
                       key={item.id}
-                      href={`/blue/alerts?alert=${item.id}`}
+                      href={`/blue/detection?tab=alerts&alert=${item.id}`}
                       className="flex min-w-0 items-center justify-between gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/40"
                     >
                       <div className="min-w-0">

@@ -515,7 +515,7 @@ function CaseDetailInner() {
                                 ]),
                               ).map((evidenceID) => (
                                 <Button asChild key={`alert-${evidenceID}`} variant="outline" size="xs">
-                                  <Link href={`/blue/alerts?alert=${evidenceID}`}>
+                                  <Link href={`/blue/detection?tab=alerts&alert=${evidenceID}`}>
                                     {copy.alertID}
                                     {evidenceID}
                                   </Link>

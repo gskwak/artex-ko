@@ -48,6 +48,7 @@ interface NavItemBase {
 
 export interface NavMainLinkItem extends NavItemBase {
   url: string;
+  activeUrls?: string[];
   subItems?: never;
 }
 
@@ -63,19 +64,24 @@ export interface NavGroup {
   items: NavMainItem[];
 }
 
-const systemItems: NavMainItem[] = [
-  { id: "llm", title: "LLM", url: "/system/llm", icon: Brain },
-  { id: "agents", title: "Agent", url: "/system/agents", icon: Bot },
-  { id: "mcp", title: "MCP", url: "/system/mcp", icon: Plug },
-  { id: "skills", title: "Skill", url: "/system/skills", icon: Sparkles },
-  { id: "tools", title: "Tools", url: "/system/tools", icon: Wrench },
-  { id: "notify", title: "Notifications", url: "/system/notify", icon: BellRing },
-  { id: "intercept", title: "Intercept rules", url: "/system/intercept", icon: ShieldAlert },
-  { id: "asset-intercept", title: "Asset intercept", url: "/system/intercept/assets", icon: Ban },
-  { id: "approvals", title: "Approval records", url: "/system/intercept/approvals", icon: ClipboardList },
-  { id: "logs", title: "Logs", url: "/system/logs", icon: ScrollText },
-  { id: "settings", title: "System settings", url: "/system/settings", icon: Settings2 },
-];
+// Both team modes use the same System group so its placement and item order cannot drift.
+const systemGroup: NavGroup = {
+  id: 2,
+  label: "System",
+  items: [
+    { id: "llm", title: "LLM", url: "/system/llm", icon: Brain },
+    { id: "agents", title: "Agent", url: "/system/agents", icon: Bot },
+    { id: "mcp", title: "MCP", url: "/system/mcp", icon: Plug },
+    { id: "skills", title: "Skill", url: "/system/skills", icon: Sparkles },
+    { id: "tools", title: "Tools", url: "/system/tools", icon: Wrench },
+    { id: "notify", title: "Notifications", url: "/system/notify", icon: BellRing },
+    { id: "intercept", title: "Intercept rules", url: "/system/intercept", icon: ShieldAlert },
+    { id: "asset-intercept", title: "Asset intercept", url: "/system/intercept/assets", icon: Ban },
+    { id: "approvals", title: "Approval records", url: "/system/intercept/approvals", icon: ClipboardList },
+    { id: "logs", title: "Logs", url: "/system/logs", icon: ScrollText },
+    { id: "settings", title: "System settings", url: "/system/settings", icon: Settings2 },
+  ],
+};
 
 export const redSidebarItems: NavGroup[] = [
   {
@@ -94,11 +100,7 @@ export const redSidebarItems: NavGroup[] = [
       { id: "workspace", title: "Workspace", url: "/redteam/workspace", icon: FolderOpen },
     ],
   },
-  {
-    id: 2,
-    label: "System",
-    items: systemItems,
-  },
+  systemGroup,
 ];
 
 export const blueSidebarItems: NavGroup[] = [
@@ -110,17 +112,15 @@ export const blueSidebarItems: NavGroup[] = [
       { id: "chat", title: "Chat", url: "/blue/chat", icon: MessageSquare },
       { id: "tasks", title: "Tasks", url: "/blue/tasks", icon: Target },
       { id: "blueCases", title: "Cases", url: "/blue/cases", icon: FolderOpen },
+      { id: "blueEvents", title: "Events", url: "/blue/events", icon: ScrollText },
+      { id: "blueActions", title: "Response actions", url: "/blue/actions", icon: ClipboardCheck },
       {
         id: "blueDetection",
         title: "Detection",
+        url: "/blue/detection",
+        activeUrls: ["/blue/alerts", "/blue/rules"],
         icon: ShieldCheck,
-        subItems: [
-          { id: "blueAlerts", title: "Alerts", url: "/blue/alerts", icon: BellRing },
-          { id: "blueRules", title: "Detection rules", url: "/blue/rules", icon: ShieldCheck },
-        ],
       },
-      { id: "blueEvents", title: "Events", url: "/blue/events", icon: ScrollText },
-      { id: "blueActions", title: "Response actions", url: "/blue/actions", icon: ClipboardCheck },
       { id: "commands", title: "Tool executions", url: "/blue/commands", icon: Terminal },
       { id: "llm-records", title: "LLM records", url: "/blue/llm-records", icon: Radio },
       { id: "assets", title: "Assets", url: "/blue/assets", icon: Network },
@@ -128,11 +128,7 @@ export const blueSidebarItems: NavGroup[] = [
       { id: "workspace", title: "Workspace", url: "/blue/workspace", icon: FolderOpen },
     ],
   },
-  {
-    id: 2,
-    label: "System",
-    items: systemItems,
-  },
+  systemGroup,
 ];
 
 // Keep the original export for consumers that still render the red-team menu.
