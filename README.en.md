@@ -66,7 +66,7 @@ Upstream ARTEX has its prompts, UI, and documentation entirely in Chinese, which
 
 Use the mode switcher to move between **Red** penetration testing and **Blue** defensive investigation. Blue groups **Cases, Events, Traffic, Detection, and Response actions** under Investigation. Import events, run detection rules, triage alerts, and connect evidence to cases. Blue task analysis uses both the task instruction and case evidence; chat can attach evidence from a selected case. Case, event, alert, and task searches cover the stored dataset, case and task reports download as Markdown, and Blue's LLM records view shows Blue calls only. Confirmed Red findings can become linked Blue cases.
 
-For an isolated Docker practice asset, follow the [test target guide](testdata/team-target/README.md), then manually import its JSONL log under **Investigation → Events**. Automatic log collection and external containment or blocking are not implemented. Chat and analysis with a live model have not yet been verified. See the [Blue Team guide](docs/blue-team-guide.md) for the workflow and API.
+For an isolated Docker practice asset, follow the [test target guide](testdata/team-target/README.md). Under **Investigation → Events**, register its JSONL feed as an automatic source or import the generated log file manually. Automatic collection polls configured HTTP(S) JSONL feeds; it is not a packet sensor and does not perform external containment or blocking. Chat and analysis with a live subscription or API model have not yet been verified. See the [Blue Team guide](docs/blue-team-guide.md) for the workflow and API.
 
 ---
 

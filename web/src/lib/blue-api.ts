@@ -105,6 +105,35 @@ export interface BlueImportResult {
   warnings: string[];
 }
 
+export interface BlueEventSource {
+  id: number;
+  name: string;
+  url: string;
+  enabled: boolean;
+  poll_interval_seconds: number;
+  cursor: string;
+  last_synced_at?: string | null;
+  last_error: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BlueSourceSyncResult {
+  source: BlueEventSource;
+  processed: number;
+  alerts_matched: number;
+  alerts_created: number;
+  detection_errors: number;
+  warnings: string[];
+}
+
+export interface BlueEventSourceInput {
+  name: string;
+  url: string;
+  enabled?: boolean;
+  poll_interval_seconds?: number;
+}
+
 export interface BlueObservationInput {
   kind: BlueObservationKind;
   summary: string;
@@ -210,6 +239,12 @@ export const blueApi = {
     blueRequest<BlueEvent>(`/events/${id}/move-case`, json("POST", { case_id: caseID })),
   importEvents: (events: BlueEventInput[]) => blueRequest<BlueImportResult>("/events/import", json("POST", { events })),
   uploadEvents: (file: File, source?: string) => uploadBlueFile<BlueImportResult>("/events/import", file, source),
+  eventSources: () => blueRequest<BlueEventSource[]>("/sources"),
+  createEventSource: (body: BlueEventSourceInput) => blueRequest<BlueEventSource>("/sources", json("POST", body)),
+  updateEventSource: (id: number, body: Partial<BlueEventSourceInput> & { reset_cursor?: boolean }) =>
+    blueRequest<BlueEventSource>(`/sources/${id}`, json("PATCH", body)),
+  deleteEventSource: (id: number) => blueRequest<void>(`/sources/${id}`, { method: "DELETE" }),
+  syncEventSource: (id: number) => blueRequest<BlueSourceSyncResult>(`/sources/${id}/sync`, json("POST", {})),
   alerts: (query?: {
     q?: string;
     case_id?: number;
@@ -225,7 +260,8 @@ export const blueApi = {
     blueRequest<BlueObservation[]>(withQuery(`/cases/${caseID}/observations`, query)),
   addObservation: (caseID: number, body: BlueObservationInput) =>
     blueRequest<BlueObservation>(`/cases/${caseID}/observations`, json("POST", body)),
-  analyzeCase: (caseID: number) => blueRequest<{ run: BlueAnalysisRun }>(`/cases/${caseID}/analyze`, json("POST", {})),
+  analyzeCase: (caseID: number, evidence?: { event_ids?: number[]; alert_ids?: number[] }) =>
+    blueRequest<{ run: BlueAnalysisRun }>(`/cases/${caseID}/analyze`, json("POST", evidence ?? {})),
   analyses: (caseID: number) => blueRequest<{ runs: BlueAnalysisRun[] }>(`/cases/${caseID}/analyses`),
   analysis: (runID: number) => blueRequest<{ run: BlueAnalysisRun }>(`/analyses/${runID}`),
   actions: (caseID: number) => blueRequest<BlueAction[]>(`/cases/${caseID}/actions`),

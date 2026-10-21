@@ -113,9 +113,11 @@ func TestBlueTaskWorkflowPG(t *testing.T) {
 		Task db.BlueTask        `json:"task"`
 		Run  db.BlueAnalysisRun `json:"run"`
 	}
-	blueAPIRequest(t, h, token, http.MethodPost, path+"/run", nil, http.StatusAccepted, &queued)
+	blueAPIRequest(t, h, token, http.MethodPost, path+"/run",
+		map[string]any{"event_ids": []int64{eventID}}, http.StatusAccepted, &queued)
 	if queued.Task.Status != "in_progress" || queued.Task.AnalysisRunID == nil ||
-		*queued.Task.AnalysisRunID != queued.Run.ID || queued.Run.CaseID != caseID {
+		*queued.Task.AnalysisRunID != queued.Run.ID || queued.Run.CaseID != caseID ||
+		len(queued.Run.SelectedEventIDs) != 1 || queued.Run.SelectedEventIDs[0] != eventID {
 		t.Fatalf("task was not bound to queued analysis: %+v", queued)
 	}
 	select {
@@ -136,7 +138,8 @@ func TestBlueTaskWorkflowPG(t *testing.T) {
 		t.Fatal("task analysis did not capture model input")
 	}
 	if input.Task == nil || input.Task.ID != taskID || input.Task.Title != fixture ||
-		input.Task.Description != "Review authentication evidence" || input.Task.Priority != "critical" {
+		input.Task.Description != "Review authentication evidence" || input.Task.Priority != "critical" ||
+		len(input.SelectedEventIDs) != 1 || input.SelectedEventIDs[0] != eventID {
 		t.Fatalf("task instructions were not supplied to the model: %+v", input.Task)
 	}
 	blueAPIRequest(t, h, token, http.MethodPatch, path,

@@ -3,10 +3,14 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Autumn-27/artex/db"
 )
+
+var errBlueChatInvalidEvidence = errors.New("selected evidence must belong to the case and fit the evidence limit")
 
 // A chat attachment is a bounded snapshot of records already linked to one
 // Blue case. The model cannot choose additional records or call a retrieval tool.
@@ -44,10 +48,32 @@ type blueChatEvidence struct {
 		Severity    string `json:"severity"`
 		Summary     string `json:"summary"`
 	} `json:"case"`
-	Events          []blueChatEvidenceEvent `json:"events"`
-	Alerts          []blueChatEvidenceAlert `json:"alerts"`
-	EventsTruncated bool                    `json:"events_truncated"`
-	AlertsTruncated bool                    `json:"alerts_truncated"`
+	Events           []blueChatEvidenceEvent `json:"events"`
+	Alerts           []blueChatEvidenceAlert `json:"alerts"`
+	SelectedEventIDs []int64                 `json:"selected_event_ids,omitempty"`
+	SelectedAlertIDs []int64                 `json:"selected_alert_ids,omitempty"`
+	EventsTruncated  bool                    `json:"events_truncated"`
+	AlertsTruncated  bool                    `json:"alerts_truncated"`
+}
+
+func validateBlueChatSelectedIDs(eventIDs, alertIDs []int64) error {
+	for _, group := range []struct {
+		name  string
+		ids   []int64
+		limit int
+	}{{"event_ids", eventIDs, blueChatEvidenceEvents}, {"alert_ids", alertIDs, blueChatEvidenceAlerts}} {
+		if len(group.ids) > group.limit {
+			return fmt.Errorf("%s exceeds the selection limit: %w", group.name, errBlueChatInvalidEvidence)
+		}
+		seen := make(map[int64]bool, len(group.ids))
+		for _, id := range group.ids {
+			if id <= 0 || seen[id] {
+				return fmt.Errorf("%s contains an invalid or duplicate ID: %w", group.name, errBlueChatInvalidEvidence)
+			}
+			seen[id] = true
+		}
+	}
+	return nil
 }
 
 func clipBlueChatEvidence(value string, maxRunes int) string {
@@ -58,10 +84,35 @@ func clipBlueChatEvidence(value string, maxRunes int) string {
 	return string(runes[:maxRunes]) + "… [truncated]"
 }
 
-func loadBlueChatCase(ctx context.Context, pg *db.DB, id int64) (*blueChatAttachedCase, error) {
+func loadBlueChatCase(ctx context.Context, pg *db.DB, id int64, selectedEventIDs, selectedAlertIDs []int64) (*blueChatAttachedCase, error) {
+	if err := validateBlueChatSelectedIDs(selectedEventIDs, selectedAlertIDs); err != nil {
+		return nil, err
+	}
 	item, err := pg.GetBlueCase(ctx, id)
 	if err != nil || item == nil {
 		return nil, err
+	}
+	selectedEvents := make([]db.BlueEvent, 0, len(selectedEventIDs))
+	selectedAlerts := make([]db.BlueAlert, 0, len(selectedAlertIDs))
+	for _, eventID := range selectedEventIDs {
+		event, err := pg.GetBlueEvent(ctx, eventID)
+		if err != nil {
+			return nil, err
+		}
+		if event == nil || event.CaseID == nil || *event.CaseID != id {
+			return nil, fmt.Errorf("event %d: %w", eventID, errBlueChatInvalidEvidence)
+		}
+		selectedEvents = append(selectedEvents, *event)
+	}
+	for _, alertID := range selectedAlertIDs {
+		alert, err := pg.GetBlueAlert(ctx, alertID)
+		if err != nil {
+			return nil, err
+		}
+		if alert == nil || alert.CaseID == nil || *alert.CaseID != id {
+			return nil, fmt.Errorf("alert %d: %w", alertID, errBlueChatInvalidEvidence)
+		}
+		selectedAlerts = append(selectedAlerts, *alert)
 	}
 	events, err := pg.ListBlueEvents(ctx, &id, "", blueChatEvidenceEvents+1, 0)
 	if err != nil {
@@ -72,10 +123,12 @@ func loadBlueChatCase(ctx context.Context, pg *db.DB, id int64) (*blueChatAttach
 		return nil, err
 	}
 	evidence := blueChatEvidence{
-		Events:          make([]blueChatEvidenceEvent, 0, min(len(events), blueChatEvidenceEvents)),
-		Alerts:          make([]blueChatEvidenceAlert, 0, min(len(alerts), blueChatEvidenceAlerts)),
-		EventsTruncated: len(events) > blueChatEvidenceEvents,
-		AlertsTruncated: len(alerts) > blueChatEvidenceAlerts,
+		Events:           make([]blueChatEvidenceEvent, 0, blueChatEvidenceEvents),
+		Alerts:           make([]blueChatEvidenceAlert, 0, blueChatEvidenceAlerts),
+		SelectedEventIDs: append([]int64(nil), selectedEventIDs...),
+		SelectedAlertIDs: append([]int64(nil), selectedAlertIDs...),
+		EventsTruncated:  len(events) > blueChatEvidenceEvents,
+		AlertsTruncated:  len(alerts) > blueChatEvidenceAlerts,
 	}
 	evidence.Case.ID = item.ID
 	evidence.Case.Title = clipBlueChatEvidence(item.Title, 250)
@@ -83,7 +136,27 @@ func loadBlueChatCase(ctx context.Context, pg *db.DB, id int64) (*blueChatAttach
 	evidence.Case.Status = item.Status
 	evidence.Case.Severity = item.Severity
 	evidence.Case.Summary = clipBlueChatEvidence(item.Summary, 700)
-	for _, event := range events[:min(len(events), blueChatEvidenceEvents)] {
+	selectedEventSet := make(map[int64]bool, len(selectedEvents))
+	for _, event := range selectedEvents {
+		selectedEventSet[event.ID] = true
+	}
+	for _, event := range events {
+		if len(selectedEvents) == blueChatEvidenceEvents {
+			break
+		}
+		if !selectedEventSet[event.ID] {
+			selectedEvents = append(selectedEvents, event)
+			selectedEventSet[event.ID] = true
+		}
+	}
+	if len(selectedEvents) > blueChatEvidenceEvents {
+		selectedEvents = selectedEvents[:blueChatEvidenceEvents]
+		evidence.EventsTruncated = true
+	}
+	if len(events) > len(selectedEvents) {
+		evidence.EventsTruncated = true
+	}
+	for _, event := range selectedEvents {
 		evidence.Events = append(evidence.Events, blueChatEvidenceEvent{
 			ID: event.ID, Source: clipBlueChatEvidence(event.Source, 120),
 			EventType: clipBlueChatEvidence(event.EventType, 120), Severity: event.Severity,
@@ -91,7 +164,27 @@ func loadBlueChatCase(ctx context.Context, pg *db.DB, id int64) (*blueChatAttach
 			OccurredAt: event.OccurredAt, RawPreview: clipBlueChatEvidence(string(event.Raw), 450),
 		})
 	}
-	for _, alert := range alerts[:min(len(alerts), blueChatEvidenceAlerts)] {
+	selectedAlertSet := make(map[int64]bool, len(selectedAlerts))
+	for _, alert := range selectedAlerts {
+		selectedAlertSet[alert.ID] = true
+	}
+	for _, alert := range alerts {
+		if len(selectedAlerts) == blueChatEvidenceAlerts {
+			break
+		}
+		if !selectedAlertSet[alert.ID] {
+			selectedAlerts = append(selectedAlerts, alert)
+			selectedAlertSet[alert.ID] = true
+		}
+	}
+	if len(selectedAlerts) > blueChatEvidenceAlerts {
+		selectedAlerts = selectedAlerts[:blueChatEvidenceAlerts]
+		evidence.AlertsTruncated = true
+	}
+	if len(alerts) > len(selectedAlerts) {
+		evidence.AlertsTruncated = true
+	}
+	for _, alert := range selectedAlerts {
 		evidence.Alerts = append(evidence.Alerts, blueChatEvidenceAlert{
 			ID: alert.ID, EventID: alert.EventID, Title: clipBlueChatEvidence(alert.Title, 250),
 			Severity: alert.Severity, Status: alert.Status, Reason: clipBlueChatEvidence(alert.Reason, 450),
@@ -101,13 +194,16 @@ func loadBlueChatCase(ctx context.Context, pg *db.DB, id int64) (*blueChatAttach
 	if err != nil {
 		return nil, err
 	}
-	for len(payload) > blueChatEvidenceBytes && len(evidence.Events)+len(evidence.Alerts) > 0 {
-		if len(evidence.Events) >= len(evidence.Alerts) && len(evidence.Events) > 0 {
+	for len(payload) > blueChatEvidenceBytes {
+		if len(evidence.Events) > len(selectedEventIDs) &&
+			(len(evidence.Events) >= len(evidence.Alerts) || len(evidence.Alerts) == len(selectedAlertIDs)) {
 			evidence.Events = evidence.Events[:len(evidence.Events)-1]
 			evidence.EventsTruncated = true
-		} else {
+		} else if len(evidence.Alerts) > len(selectedAlertIDs) {
 			evidence.Alerts = evidence.Alerts[:len(evidence.Alerts)-1]
 			evidence.AlertsTruncated = true
+		} else {
+			return nil, fmt.Errorf("selected records exceed the case evidence budget: %w", errBlueChatInvalidEvidence)
 		}
 		payload, err = json.Marshal(evidence)
 		if err != nil {
@@ -116,18 +212,22 @@ func loadBlueChatCase(ctx context.Context, pg *db.DB, id int64) (*blueChatAttach
 	}
 	ref := struct {
 		BlueCase struct {
-			ID              int64   `json:"id"`
-			Title           string  `json:"title"`
-			EventIDs        []int64 `json:"event_ids"`
-			AlertIDs        []int64 `json:"alert_ids"`
-			EventsTruncated bool    `json:"events_truncated"`
-			AlertsTruncated bool    `json:"alerts_truncated"`
+			ID               int64   `json:"id"`
+			Title            string  `json:"title"`
+			EventIDs         []int64 `json:"event_ids"`
+			AlertIDs         []int64 `json:"alert_ids"`
+			SelectedEventIDs []int64 `json:"selected_event_ids,omitempty"`
+			SelectedAlertIDs []int64 `json:"selected_alert_ids,omitempty"`
+			EventsTruncated  bool    `json:"events_truncated"`
+			AlertsTruncated  bool    `json:"alerts_truncated"`
 		} `json:"blue_case"`
 	}{}
 	ref.BlueCase.ID = id
 	ref.BlueCase.Title = clipBlueChatEvidence(item.Title, 120)
 	ref.BlueCase.EventIDs = make([]int64, 0, len(evidence.Events))
 	ref.BlueCase.AlertIDs = make([]int64, 0, len(evidence.Alerts))
+	ref.BlueCase.SelectedEventIDs = append([]int64(nil), selectedEventIDs...)
+	ref.BlueCase.SelectedAlertIDs = append([]int64(nil), selectedAlertIDs...)
 	ref.BlueCase.EventsTruncated = evidence.EventsTruncated
 	ref.BlueCase.AlertsTruncated = evidence.AlertsTruncated
 	for _, event := range evidence.Events {

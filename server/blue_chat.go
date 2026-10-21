@@ -191,8 +191,10 @@ func (s *Server) blueSendConversationMessage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req struct {
-		Message string `json:"message"`
-		CaseID  *int64 `json:"case_id"`
+		Message  string  `json:"message"`
+		CaseID   *int64  `json:"case_id"`
+		EventIDs []int64 `json:"event_ids"`
+		AlertIDs []int64 `json:"alert_ids"`
 	}
 	if !decodeConversationRequest(w, r, &req) {
 		return
@@ -206,6 +208,14 @@ func (s *Server) blueSendConversationMessage(w http.ResponseWriter, r *http.Requ
 		writeErr(w, http.StatusBadRequest, "message is too long")
 		return
 	}
+	if (len(req.EventIDs) != 0 || len(req.AlertIDs) != 0) && req.CaseID == nil {
+		writeErr(w, http.StatusBadRequest, "case_id is required when selecting evidence")
+		return
+	}
+	if err := validateBlueChatSelectedIDs(req.EventIDs, req.AlertIDs); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	var attached *blueChatAttachedCase
 	if req.CaseID != nil {
 		if *req.CaseID <= 0 {
@@ -213,9 +223,13 @@ func (s *Server) blueSendConversationMessage(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		var err error
-		attached, err = loadBlueChatCase(r.Context(), pg, *req.CaseID)
+		attached, err = loadBlueChatCase(r.Context(), pg, *req.CaseID, req.EventIDs, req.AlertIDs)
 		if err != nil {
-			blueInternal(w, err)
+			if errors.Is(err, errBlueChatInvalidEvidence) {
+				writeErr(w, http.StatusBadRequest, err.Error())
+			} else {
+				blueInternal(w, err)
+			}
 			return
 		}
 		if attached == nil {

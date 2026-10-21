@@ -123,6 +123,7 @@ export const blueSidebarItems: NavGroup[] = [
         icon: ShieldCheck,
       },
       { id: "llm-records", title: "LLM records", url: "/blue/llm-records", icon: Radio },
+      { id: "assets", title: "Assets", url: "/blue/assets", icon: Network },
     ],
   },
   systemGroup,

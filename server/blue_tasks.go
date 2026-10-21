@@ -242,6 +242,10 @@ func (s *Server) blueRunTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	selection, ok := readBlueEvidenceSelection(w, r)
+	if !ok {
+		return
+	}
 	item, err := pg.GetBlueTask(r.Context(), id)
 	if err != nil {
 		blueInternal(w, err)
@@ -259,7 +263,9 @@ func (s *Server) blueRunTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "only open or blocked tasks can be run")
 		return
 	}
-	job, status, message := s.prepareBlueCaseAnalysis(r.Context(), pg, *item.CaseID)
+	taskInput := &analysis.Task{ID: item.ID, Title: item.Title,
+		Description: item.Description, Priority: item.Priority}
+	job, status, message := s.prepareBlueCaseAnalysis(r.Context(), pg, *item.CaseID, selection, taskInput)
 	if job == nil {
 		writeErr(w, status, message)
 		return
@@ -285,6 +291,14 @@ func (s *Server) blueRunTask(w http.ResponseWriter, r *http.Request) {
 	job.input.Task = &analysis.Task{
 		ID: updated.ID, Title: updated.Title,
 		Description: updated.Description, Priority: updated.Priority,
+	}
+	if !analysis.FitsSelectedEvidence(job.input) {
+		if _, finishErr := s.blueUpdateRun(pg, job.run.ID, "failed", nil, errSelectedBlueEvidenceTooLarge.Error()); finishErr != nil {
+			log.Printf("[blue] reject oversized task evidence run %d: %v", job.run.ID, finishErr)
+		}
+		<-blueAnalysisSlots
+		writeErr(w, http.StatusBadRequest, errSelectedBlueEvidenceTooLarge.Error())
+		return
 	}
 	s.startBlueAnalysis(pg, job)
 	writeJSON(w, http.StatusAccepted, map[string]any{"task": updated, "run": &job.run})

@@ -1409,6 +1409,25 @@ CREATE INDEX IF NOT EXISTS idx_notification_deliveries_channel
 -- an alert is resolved. Response actions record decisions only; no SQL trigger
 -- or approval transition executes an external action.
 -- =====================================================================
+-- Blue assets are durable defensive identities. Red exploration assets may be
+-- deleted with a task, company, or host and must not own Blue evidence links.
+CREATE TABLE IF NOT EXISTS blue_assets (
+    id         BIGSERIAL PRIMARY KEY,
+    kind       TEXT NOT NULL CHECK (kind IN ('host','ip','domain','service','application','other')),
+    identifier TEXT NOT NULL CHECK (btrim(identifier) <> '' AND length(identifier) <= 500),
+    label      TEXT NOT NULL CHECK (btrim(label) <> '' AND length(label) <= 200),
+    status     TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+    notes      TEXT NOT NULL DEFAULT '' CHECK (length(notes) <= 10000),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_blue_assets_identity
+    ON blue_assets(kind, lower(btrim(identifier)));
+CREATE INDEX IF NOT EXISTS idx_blue_assets_status ON blue_assets(status, updated_at DESC);
+DROP TRIGGER IF EXISTS trg_blue_assets_upd ON blue_assets;
+CREATE TRIGGER trg_blue_assets_upd BEFORE UPDATE ON blue_assets
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 CREATE TABLE IF NOT EXISTS blue_cases (
     id             BIGSERIAL PRIMARY KEY,
     title          TEXT NOT NULL,
@@ -1429,6 +1448,17 @@ DROP TRIGGER IF EXISTS trg_blue_cases_upd ON blue_cases;
 CREATE TRIGGER trg_blue_cases_upd BEFORE UPDATE ON blue_cases
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+-- Explicit analyst links supplement assets derived from a case's current
+-- events. Keeping these separate avoids stale inferred links after an event is
+-- moved to another case.
+CREATE TABLE IF NOT EXISTS blue_case_assets (
+    case_id    BIGINT NOT NULL REFERENCES blue_cases(id) ON DELETE CASCADE,
+    asset_id   BIGINT NOT NULL REFERENCES blue_assets(id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (case_id, asset_id)
+);
+CREATE INDEX IF NOT EXISTS idx_blue_case_assets_asset ON blue_case_assets(asset_id, case_id);
+
 CREATE TABLE IF NOT EXISTS blue_events (
     id          BIGSERIAL PRIMARY KEY,
     case_id     BIGINT REFERENCES blue_cases(id) ON DELETE SET NULL,
@@ -1443,11 +1473,37 @@ CREATE TABLE IF NOT EXISTS blue_events (
     raw         JSONB NOT NULL DEFAULT '{}',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE blue_events ADD COLUMN IF NOT EXISTS asset_id BIGINT
+    REFERENCES blue_assets(id) ON DELETE RESTRICT;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_blue_events_external ON blue_events(source, external_id)
     WHERE external_id IS NOT NULL AND external_id <> '';
 CREATE INDEX IF NOT EXISTS idx_blue_events_case_time ON blue_events(case_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_blue_events_time ON blue_events(occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_blue_events_source_time ON blue_events(source, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_blue_events_asset_time ON blue_events(asset_id, occurred_at DESC)
+    WHERE asset_id IS NOT NULL;
+
+-- Explicitly configured JSONL pull feeds. Cursor advancement follows a
+-- committed event import, so a failed request can be retried without losing
+-- evidence. Deleting a feed never deletes the events already imported from it.
+CREATE TABLE IF NOT EXISTS blue_event_sources (
+    id                    BIGSERIAL PRIMARY KEY,
+    name                  TEXT NOT NULL CHECK (btrim(name) <> '' AND length(name) <= 200),
+    url                   TEXT NOT NULL CHECK (btrim(url) <> '' AND length(url) <= 2048),
+    enabled               BOOLEAN NOT NULL DEFAULT true,
+    poll_interval_seconds INTEGER NOT NULL DEFAULT 30
+                          CHECK (poll_interval_seconds BETWEEN 10 AND 3600),
+    cursor                TEXT NOT NULL DEFAULT '' CHECK (length(cursor) <= 2048),
+    last_synced_at        TIMESTAMPTZ,
+    last_error            TEXT NOT NULL DEFAULT '',
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_blue_event_sources_name ON blue_event_sources(lower(name));
+CREATE INDEX IF NOT EXISTS idx_blue_event_sources_poll ON blue_event_sources(enabled,last_synced_at);
+DROP TRIGGER IF EXISTS trg_blue_event_sources_upd ON blue_event_sources;
+CREATE TRIGGER trg_blue_event_sources_upd BEFORE UPDATE ON blue_event_sources
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE TABLE IF NOT EXISTS blue_rules (
     id          BIGSERIAL PRIMARY KEY,
@@ -1525,7 +1581,11 @@ CREATE TABLE IF NOT EXISTS blue_actions (
     decided_at    TIMESTAMPTZ,
     completed_at  TIMESTAMPTZ
 );
+ALTER TABLE blue_actions ADD COLUMN IF NOT EXISTS asset_id BIGINT
+    REFERENCES blue_assets(id) ON DELETE RESTRICT;
 CREATE INDEX IF NOT EXISTS idx_blue_actions_case ON blue_actions(case_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_blue_actions_asset ON blue_actions(asset_id, created_at DESC)
+    WHERE asset_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_blue_actions_pending ON blue_actions(created_at DESC)
     WHERE status='pending';
 
@@ -1539,8 +1599,12 @@ CREATE TABLE IF NOT EXISTS blue_analysis_runs (
     error            TEXT NOT NULL DEFAULT '',
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     started_at       TIMESTAMPTZ,
-    finished_at      TIMESTAMPTZ
+    finished_at      TIMESTAMPTZ,
+    selected_event_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+    selected_alert_ids JSONB NOT NULL DEFAULT '[]'::jsonb
 );
+ALTER TABLE blue_analysis_runs ADD COLUMN IF NOT EXISTS selected_event_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE blue_analysis_runs ADD COLUMN IF NOT EXISTS selected_alert_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
 CREATE INDEX IF NOT EXISTS idx_blue_analysis_runs_case ON blue_analysis_runs(case_id, created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_blue_analysis_runs_active_case
     ON blue_analysis_runs(case_id) WHERE status IN ('queued','running');

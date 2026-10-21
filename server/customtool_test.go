@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Autumn-27/artex/traffic"
 )
 
 func TestRenderTemplateCommand(t *testing.T) {
@@ -153,6 +155,30 @@ func TestRunHTTPTool(t *testing.T) {
 	}
 	if out.Status != 201 || !strings.Contains(out.Body, `"ok":true`) {
 		t.Fatalf("response not captured: %+v", out)
+	}
+}
+
+func TestHTTPToolRecordingProxyURL(t *testing.T) {
+	recorder, err := traffic.Open(t.TempDir(), "127.0.0.1:18888")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = recorder.Close() })
+	s := &Server{m: &Manager{traffic: recorder, trafficOn: true}}
+	transport := s.httpProxyTransport(httpExec{UseRecordingProxy: true})
+	if transport == nil || transport.Proxy == nil {
+		t.Fatal("recording proxy transport is missing")
+	}
+	req, err := http.NewRequest(http.MethodGet, "http://example.test/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyURL, err := transport.Proxy(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := proxyURL.String(), "http://127.0.0.1:18888"; got != want {
+		t.Fatalf("recording proxy URL = %q, want %q", got, want)
 	}
 }
 

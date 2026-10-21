@@ -18,15 +18,15 @@ const copy = {
       title: "Blue Team assets",
       description: "The Red Team asset inventory is separate from Blue Team evidence.",
       detail:
-        "Imported Blue Team events include asset names and network addresses. Investigate those records in Events and Traffic. A separate Blue Team asset inventory is not yet available.",
-      link: "View events",
-      href: "/blue/events",
+        "Register defensive assets in the Blue Team inventory, then link them to cases, events, and response decisions. Original event asset text remains part of the evidence.",
+      link: "View assets",
+      href: "/blue/assets",
     },
     sync: {
       title: "Blue Team asset sync",
       description: "Red Team asset synchronization does not import Blue Team telemetry.",
       detail:
-        "Import defensive logs from the Events page. Network records then appear in Traffic. Automated sensor or asset synchronization is not yet available for Blue Team.",
+        "Import defensive logs or configure a trusted HTTP JSONL source on the Events page. Network records appear in Traffic. Red Team asset synchronization does not populate the Blue Team inventory.",
       link: "Import events",
       href: "/blue/events",
     },
@@ -44,15 +44,15 @@ const copy = {
       title: "블루팀 자산",
       description: "레드팀 자산 목록은 블루팀 조사 증거와 별개입니다.",
       detail:
-        "가져온 블루팀 이벤트에는 자산명과 네트워크 주소가 포함될 수 있습니다. 이벤트와 트래픽에서 조사하세요. 블루팀 전용 자산 목록은 아직 제공되지 않습니다.",
-      link: "이벤트 보기",
-      href: "/blue/events",
+        "블루팀 전용 목록에 방어 자산을 등록하고 사건·이벤트·대응 결정에 연결하세요. 이벤트의 원래 자산 문자열은 증거로 보존됩니다.",
+      link: "자산 보기",
+      href: "/blue/assets",
     },
     sync: {
       title: "블루팀 자산 동기화",
       description: "레드팀 자산 동기화는 블루팀 로그를 가져오지 않습니다.",
       detail:
-        "방어 로그는 이벤트 화면에서 가져올 수 있습니다. 네트워크 기록은 트래픽에서 확인하세요. 블루팀의 자동 센서·자산 동기화는 아직 제공되지 않습니다.",
+        "이벤트 화면에서 방어 로그를 가져오거나 신뢰할 수 있는 HTTP JSONL 자동 수집 소스를 등록하세요. 네트워크 기록은 트래픽에 표시됩니다. 레드팀 자산 동기화는 블루팀 자산 목록을 채우지 않습니다.",
       link: "이벤트 가져오기",
       href: "/blue/events",
     },
@@ -69,14 +69,15 @@ const copy = {
     assets: {
       title: "蓝队资产",
       description: "红队资产清单与蓝队调查证据分开。",
-      detail: "导入的蓝队事件可包含资产名称和网络地址。请在事件和流量中调查这些记录。蓝队独立资产清单尚不可用。",
-      link: "查看事件",
-      href: "/blue/events",
+      detail: "在蓝队资产清单中登记防御资产，再将其关联到案件、事件和响应决策。事件中的原始资产文本会作为证据保留。",
+      link: "查看资产",
+      href: "/blue/assets",
     },
     sync: {
       title: "蓝队资产同步",
       description: "红队资产同步不会导入蓝队遥测数据。",
-      detail: "请从事件页面导入防御日志，然后在流量页面查看网络记录。蓝队自动传感器或资产同步尚不可用。",
+      detail:
+        "请在事件页面导入防御日志，或配置可信的 HTTP JSONL 自动采集源。网络记录会显示在流量页面。红队资产同步不会填充蓝队资产清单。",
       link: "导入事件",
       href: "/blue/events",
     },
@@ -93,15 +94,15 @@ const copy = {
       title: "Activos del equipo azul",
       description: "El inventario del equipo rojo está separado de las pruebas del equipo azul.",
       detail:
-        "Los eventos importados pueden incluir nombres de activos y direcciones de red. Investíguelos en Eventos y Tráfico. Aún no hay un inventario independiente para el equipo azul.",
-      link: "Ver eventos",
-      href: "/blue/events",
+        "Registre activos defensivos en el inventario azul y vincúlelos con casos, eventos y decisiones de respuesta. El texto original del activo del evento se conserva como prueba.",
+      link: "Ver activos",
+      href: "/blue/assets",
     },
     sync: {
       title: "Sincronización de activos del equipo azul",
       description: "La sincronización del equipo rojo no importa la telemetría del equipo azul.",
       detail:
-        "Importe registros defensivos desde Eventos y consulte los registros de red en Tráfico. Aún no hay sincronización automática de sensores o activos para el equipo azul.",
+        "Importe registros defensivos o configure una fuente HTTP JSONL de confianza en Eventos. Los registros de red aparecen en Tráfico. La sincronización roja no rellena el inventario azul.",
       link: "Importar eventos",
       href: "/blue/events",
     },

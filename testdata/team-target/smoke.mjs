@@ -176,12 +176,58 @@ try {
   const fixtureTraffic = await api(base, token, "GET", "/api/blue/traffic?source=artex-lab-target&protocol=TCP", undefined, 200, "Lab asset traffic lookup");
   check(fixtureTraffic.total > 0, "Lab asset traffic visible after import");
 
+  const source = await api(base, token, "POST", "/api/blue/sources", {
+    name: `${prefix} HTTP feed`,
+    url: `http://${target}:8080/logs/events`,
+    enabled: false,
+    poll_interval_seconds: 10,
+  }, 201, "Lab HTTP JSONL source created");
+  check(Number.isInteger(source.id) && source.cursor === "" && source.enabled === false, "Disabled pull source starts at the beginning");
+  const sources = await api(base, token, "GET", "/api/blue/sources", undefined, 200, "Blue source list");
+  check(Array.isArray(sources) && sources.some((item) => item.id === source.id), "Lab pull source appears in source list");
+
+  async function syncSourceToEnd(initialCursor, label) {
+    let cursor = initialCursor;
+    let processedCount = 0;
+    for (let page = 1; page <= 100; page++) {
+      const synced = await api(base, token, "POST", `/api/blue/sources/${source.id}/sync`, {}, 200, `${label} page ${page}`);
+      check(synced.source?.id === source.id && typeof synced.source.cursor === "string" && Number.isInteger(synced.processed), `${label} returns source and processed count`);
+      processedCount += synced.processed;
+      if (synced.source.cursor === cursor) {
+        check(synced.processed === 0, `${label} reaches feed end without cursor regression`);
+        return { processedCount, pages: page, cursor };
+      }
+      cursor = synced.source.cursor;
+    }
+    throw new Error(`${label} exceeded 100 pages of lab logs`);
+  }
+
+  const firstPull = await syncSourceToEnd(source.cursor, "Lab source initial sync");
+  check(firstPull.processedCount > 0 && firstPull.cursor !== "", "Lab HTTP logs collected without file upload");
+  const pulledTraffic = await api(base, token, "GET", "/api/blue/traffic?source=artex-lab-target&protocol=TCP", undefined, 200, "Pulled HTTP traffic lookup");
+  check(pulledTraffic.total > fixtureTraffic.total, "Pulled lab records appear in Blue Traffic");
+
+  const repeat = await api(base, token, "POST", `/api/blue/sources/${source.id}/sync`, {}, 200, "Lab source repeat sync");
+  check(repeat.processed === 0 && repeat.source?.cursor === firstPull.cursor, "Repeat sync processes no new records");
+  const repeatedTraffic = await api(base, token, "GET", "/api/blue/traffic?source=artex-lab-target&protocol=TCP", undefined, 200, "Traffic after repeat sync");
+  check(repeatedTraffic.total === pulledTraffic.total, "Repeat sync does not duplicate traffic");
+
+  const reset = await api(base, token, "PATCH", `/api/blue/sources/${source.id}`, { reset_cursor: true }, 200, "Lab source cursor reset");
+  check(reset.cursor === "" && reset.enabled === false, "Cursor reset keeps pull source disabled");
+  const replay = await api(base, token, "POST", `/api/blue/sources/${source.id}/sync`, {}, 200, "Lab source replay sync");
+  check(replay.processed > 0 && replay.source?.cursor !== "", "Reset cursor replays the first feed page");
+  const replayTraffic = await api(base, token, "GET", "/api/blue/traffic?source=artex-lab-target&protocol=TCP", undefined, 200, "Traffic after source replay");
+  check(replayTraffic.total === pulledTraffic.total, "Cursor replay reuses existing source event IDs");
+  await api(base, token, "DELETE", `/api/blue/sources/${source.id}`, undefined, 204, "Lab pull source deleted");
+  const remainingSources = await api(base, token, "GET", "/api/blue/sources", undefined, 200, "Blue source list after deletion");
+  check(Array.isArray(remainingSources) && !remainingSources.some((item) => item.id === source.id), "Deleted pull source is absent");
+
   const redTask = await api(base, token, "POST", "/api/tasks", { description: `Inspect only ${target}:8080`, goal: `List HTTP status and title at http://${target}:8080/; do not alter the target`, timeout_seconds: 30, seed_first_intent: false }, 201, "Red task creation without model");
   check(redTask.id !== undefined, "Red task ID assigned");
   await api(base, token, "GET", `/api/tasks/${redTask.id}`, undefined, 200, "Red task record readable");
   await api(base, token, "GET", `/api/exploration/nodes?task=${redTask.id}&kind=goal`, undefined, 200, "Red task goal nodes readable");
 
-  process.stdout.write(JSON.stringify({ status: "passed", image: imageSnapshot, checks: results, fixtureRecords: fileImported.imported, fixtureTraffic: fixtureTraffic.total, redTaskModelConfigured: false }, null, 2) + "\n");
+  process.stdout.write(JSON.stringify({ status: "passed", image: imageSnapshot, checks: results, fixtureRecords: fileImported.imported, fixtureTraffic: fixtureTraffic.total, pulledRecords: firstPull.processedCount, pulledPages: firstPull.pages, pulledTraffic: pulledTraffic.total, redTaskModelConfigured: false }, null, 2) + "\n");
 } catch (error) {
   process.stderr.write(JSON.stringify({ status: "failed", failedAt: results.at(-1) || "startup", reason: error.message }, null, 2) + "\n");
   process.exitCode = 1;

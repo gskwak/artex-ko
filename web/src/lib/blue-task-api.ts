@@ -44,6 +44,11 @@ export interface BlueTaskListQuery {
   offset?: number;
 }
 
+export interface BlueTaskEvidenceSelection {
+  event_ids?: number[];
+  alert_ids?: number[];
+}
+
 function queryString(query?: BlueTaskListQuery): string {
   if (!query) return "";
   const params = new URLSearchParams();
@@ -64,10 +69,10 @@ export const blueTaskApi = {
   create: (body: CreateBlueTask) => blueRequest<BlueTask>("/tasks", { method: "POST", body: JSON.stringify(body) }),
   update: (id: number, body: UpdateBlueTask) =>
     blueRequest<BlueTask>(`/tasks/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
-  run: (id: number) =>
+  run: (id: number, evidence?: BlueTaskEvidenceSelection) =>
     blueRequest<{ task: BlueTask; run: { id: number; status: string } }>(`/tasks/${id}/run`, {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify(evidence ?? {}),
     }),
   stop: (id: number) => blueRequest<BlueTask>(`/tasks/${id}/stop`, { method: "POST" }),
 };

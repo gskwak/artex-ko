@@ -28,7 +28,9 @@ import {
   type BlueSeverity,
   blueApi,
 } from "@/lib/blue-api";
+import { type BlueAsset, type BlueAssetEvent, type BlueCaseAsset, blueAssetsApi } from "@/lib/blue-assets-api";
 import { blueCaseStatusLabel, blueObservationKindLabel, blueSeverityLabel, useBlueCopy } from "@/lib/blue-copy";
+import { parseBlueEvidenceIDs } from "@/lib/blue-evidence-ids";
 import { blueReportButtonCopy, downloadBlueCaseReport } from "@/lib/blue-report";
 
 import {
@@ -55,6 +57,111 @@ const ACTION_KINDS = [
   "patch_system",
   "custom",
 ] as const;
+const analysisEvidenceLabels = {
+  en: {
+    title: "Evidence for case analysis",
+    hint: "Optional. Enter event and alert IDs from this case, separated by commas or spaces. Up to 12 of each. Selected records are included ahead of recent evidence; leave blank to use recent evidence only.",
+    eventIDs: "Event IDs",
+    alertIDs: "Alert IDs",
+    placeholder: "e.g. 12, 45",
+    invalid: "Enter up to 12 valid positive IDs for each evidence type.",
+  },
+  ko: {
+    title: "사건 분석에 포함할 증거",
+    hint: "선택 사항입니다. 이 사건의 이벤트·경보 ID를 쉼표나 공백으로 구분해 각 12개까지 입력하세요. 선택한 기록을 최근 증거보다 우선 포함합니다. 비워 두면 최근 증거만 사용합니다.",
+    eventIDs: "이벤트 ID",
+    alertIDs: "경보 ID",
+    placeholder: "예: 12, 45",
+    invalid: "증거 종류별로 유효한 양의 정수 ID를 최대 12개 입력하세요.",
+  },
+  zh: {
+    title: "案件分析所用证据",
+    hint: "可选。输入本案件的事件和告警 ID，以逗号或空格分隔，每类最多 12 个。选定记录会优先于最近证据；留空则只使用最近证据。",
+    eventIDs: "事件 ID",
+    alertIDs: "告警 ID",
+    placeholder: "例如 12, 45",
+    invalid: "每类证据最多输入 12 个有效的正整数 ID。",
+  },
+  es: {
+    title: "Pruebas para el análisis del caso",
+    hint: "Opcional. Introduzca los ID de eventos y alertas de este caso, separados por comas o espacios, hasta 12 de cada tipo. Los registros elegidos tienen prioridad sobre los recientes; deje los campos vacíos para usar solo los recientes.",
+    eventIDs: "ID de eventos",
+    alertIDs: "ID de alertas",
+    placeholder: "p. ej., 12, 45",
+    invalid: "Introduzca hasta 12 ID enteros positivos válidos para cada tipo de prueba.",
+  },
+} as const;
+const caseAssetLabels = {
+  en: {
+    title: "Investigation assets",
+    description: "Link this case to stable Blue Team assets. Event asset text remains the original evidence.",
+    none: "No assets are linked to this case.",
+    choose: "Choose an active asset",
+    search: "Search by asset name or identifier",
+    add: "Link asset",
+    remove: "Remove case link",
+    saved: "Asset linked to this case.",
+    removed: "Case link removed.",
+    eventNote: "Assets assigned to case events remain here even after an explicit case link is removed.",
+    eventLinked: "Linked by event",
+    originalAsset: "Original asset text",
+    linkedAsset: "Linked asset",
+    actionAsset: "Linked target asset (optional)",
+    noActionAsset: "No linked asset",
+  },
+  ko: {
+    title: "조사 자산",
+    description: "이 사건에 블루팀 자산을 연결합니다. 이벤트의 자산 문자열은 원본 증거로 유지됩니다.",
+    none: "이 사건에 연결된 자산이 없습니다.",
+    choose: "활성 자산 선택",
+    search: "자산명 또는 식별자로 검색",
+    add: "자산 연결",
+    remove: "사건 연결 해제",
+    saved: "사건에 자산을 연결했습니다.",
+    removed: "사건의 자산 연결을 해제했습니다.",
+    eventNote: "사건 이벤트에 지정된 자산은 명시적인 사건 연결을 해제해도 목록에 남습니다.",
+    eventLinked: "이벤트로 연결됨",
+    originalAsset: "원본 자산 문자열",
+    linkedAsset: "연결된 자산",
+    actionAsset: "조치 대상 자산(선택)",
+    noActionAsset: "연결 자산 없음",
+  },
+  zh: {
+    title: "调查资产",
+    description: "将此案件关联到稳定的蓝队资产。事件中的资产文本仍保留为原始证据。",
+    none: "此案件尚未关联资产。",
+    choose: "选择启用的资产",
+    search: "按资产名称或标识符搜索",
+    add: "关联资产",
+    remove: "移除案件关联",
+    saved: "资产已关联到案件。",
+    removed: "案件关联已移除。",
+    eventNote: "案件事件关联的资产，在移除显式案件关联后仍会保留在列表中。",
+    eventLinked: "由事件关联",
+    originalAsset: "原始资产文本",
+    linkedAsset: "关联资产",
+    actionAsset: "关联的目标资产（可选）",
+    noActionAsset: "无关联资产",
+  },
+  es: {
+    title: "Activos de investigación",
+    description:
+      "Vincule este caso a activos estables del equipo azul. El texto del activo del evento se conserva como evidencia original.",
+    none: "No hay activos vinculados a este caso.",
+    choose: "Elegir un activo activo",
+    search: "Buscar por nombre o identificador del activo",
+    add: "Vincular activo",
+    remove: "Quitar vínculo del caso",
+    saved: "Activo vinculado al caso.",
+    removed: "Vínculo del caso eliminado.",
+    eventNote: "Los activos asignados a eventos permanecen aquí tras quitar el vínculo explícito del caso.",
+    eventLinked: "Vinculado por evento",
+    originalAsset: "Texto original del activo",
+    linkedAsset: "Activo vinculado",
+    actionAsset: "Activo de destino vinculado (opcional)",
+    noActionAsset: "Ningún activo vinculado",
+  },
+} as const;
 const ACTION_KIND_LABELS: Record<string, Record<(typeof ACTION_KINDS)[number], string>> = {
   en: {
     isolate_host: "Isolate host",
@@ -115,6 +222,16 @@ function CaseDetailInner() {
   const [observationHasMore, setObservationHasMore] = React.useState(false);
   const [analyses, setAnalyses] = React.useState<BlueAnalysisRun[]>([]);
   const [actions, setActions] = React.useState<BlueAction[]>([]);
+  const [caseAssets, setCaseAssets] = React.useState<BlueCaseAsset[]>([]);
+  const [availableAssets, setAvailableAssets] = React.useState<BlueAsset[]>([]);
+  const [assetSearch, setAssetSearch] = React.useState("");
+  const [assetSearching, setAssetSearching] = React.useState(false);
+  const [assetChoice, setAssetChoice] = React.useState("");
+  const [chosenAsset, setChosenAsset] = React.useState<BlueAsset | null>(null);
+  const [assetError, setAssetError] = React.useState("");
+  const [assetSearchError, setAssetSearchError] = React.useState("");
+  const [linkingAsset, setLinkingAsset] = React.useState(false);
+  const [unlinkingAssetID, setUnlinkingAssetID] = React.useState<number | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState("");
   const [status, setStatus] = React.useState<BlueCaseStatus>("open");
@@ -122,6 +239,8 @@ function CaseDetailInner() {
   const [summary, setSummary] = React.useState("");
   const [saving, setSaving] = React.useState(false);
   const [analyzing, setAnalyzing] = React.useState(false);
+  const [analysisEventIDs, setAnalysisEventIDs] = React.useState("");
+  const [analysisAlertIDs, setAnalysisAlertIDs] = React.useState("");
   const [reporting, setReporting] = React.useState(false);
   const [noteKind, setNoteKind] = React.useState<BlueObservationKind>("fact");
   const [noteSummary, setNoteSummary] = React.useState("");
@@ -132,6 +251,7 @@ function CaseDetailInner() {
   const [actionKind, setActionKind] = React.useState<string>("isolate_host");
   const [customActionKind, setCustomActionKind] = React.useState("");
   const [actionTarget, setActionTarget] = React.useState("");
+  const [actionAssetID, setActionAssetID] = React.useState("");
   const [actionRationale, setActionRationale] = React.useState("");
   const [proposingAction, setProposingAction] = React.useState(false);
   const verdictLabels = {
@@ -154,6 +274,69 @@ function CaseDetailInner() {
     critical: blueSeverityLabel("critical", locale),
   };
   const reportCopy = blueReportButtonCopy(locale);
+  const evidenceCopy = analysisEvidenceLabels[locale];
+  const assetCopy = caseAssetLabels[locale];
+
+  const loadAssets = React.useCallback(async () => {
+    if (!Number.isSafeInteger(id) || id <= 0) return;
+    try {
+      const linked = await blueAssetsApi.caseAssets(id);
+      setCaseAssets(linked);
+      setAssetError("");
+    } catch (cause) {
+      setAssetError(cause instanceof Error ? cause.message : "Could not load assets");
+    }
+  }, [id]);
+
+  React.useEffect(() => {
+    setAssetChoice("");
+    setChosenAsset(null);
+    setAssetSearch("");
+    setAssetError("");
+    setAssetSearchError("");
+    setActionAssetID("");
+    setCaseAssets([]);
+    setAvailableAssets([]);
+    void loadAssets();
+  }, [loadAssets]);
+
+  React.useEffect(() => {
+    if (!Number.isSafeInteger(id) || id <= 0) return;
+    let active = true;
+    setAssetSearching(true);
+    const timer = window.setTimeout(() => {
+      blueAssetsApi
+        .list({ q: assetSearch.trim() || undefined, limit: 100 })
+        .then((assets) => {
+          if (active) {
+            setAvailableAssets(assets);
+            setAssetSearchError("");
+          }
+        })
+        .catch((cause: unknown) => {
+          if (active) setAssetSearchError(cause instanceof Error ? cause.message : "Could not search assets");
+        })
+        .finally(() => {
+          if (active) setAssetSearching(false);
+        });
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [assetSearch, id]);
+
+  React.useEffect(() => {
+    if (actionAssetID && !caseAssets.some((asset) => asset.id === Number(actionAssetID) && asset.status === "active")) {
+      setActionAssetID("");
+    }
+  }, [actionAssetID, caseAssets]);
+
+  React.useEffect(() => {
+    if (!Number.isSafeInteger(id) || id <= 0) return;
+    setAnalysisEventIDs("");
+    setAnalysisAlertIDs("");
+  }, [id]);
 
   const load = React.useCallback(async () => {
     if (!Number.isSafeInteger(id) || id <= 0) {
@@ -238,11 +421,49 @@ function CaseDetailInner() {
     }
   }
 
+  async function linkAsset() {
+    if (!item) return;
+    const assetID = Number(assetChoice);
+    if (!Number.isSafeInteger(assetID) || assetID <= 0) return;
+    setLinkingAsset(true);
+    try {
+      await blueAssetsApi.linkCaseAsset(item.id, assetID);
+      setAssetChoice("");
+      setChosenAsset(null);
+      await loadAssets();
+      toast.success(assetCopy.saved);
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : copy.saveFailed);
+    } finally {
+      setLinkingAsset(false);
+    }
+  }
+
+  async function unlinkAsset(assetID: number) {
+    if (!item) return;
+    setUnlinkingAssetID(assetID);
+    try {
+      await blueAssetsApi.unlinkCaseAsset(item.id, assetID);
+      await loadAssets();
+      toast.success(assetCopy.removed);
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : copy.saveFailed);
+    } finally {
+      setUnlinkingAssetID(null);
+    }
+  }
+
   async function analyze() {
     if (!item) return;
+    const eventIDs = parseBlueEvidenceIDs(analysisEventIDs);
+    const alertIDs = parseBlueEvidenceIDs(analysisAlertIDs);
+    if (!eventIDs || !alertIDs) {
+      toast.error(evidenceCopy.invalid);
+      return;
+    }
     setAnalyzing(true);
     try {
-      const response = await blueApi.analyzeCase(item.id);
+      const response = await blueApi.analyzeCase(item.id, { event_ids: eventIDs, alert_ids: alertIDs });
       setAnalyses((runs) => [response.run, ...runs.filter((run) => run.id !== response.run.id)]);
       toast.success(copy.analysisQueued);
     } catch (cause) {
@@ -296,13 +517,15 @@ function CaseDetailInner() {
     if (!kind || !actionTarget.trim() || !actionRationale.trim()) return;
     setProposingAction(true);
     try {
-      const created = await blueApi.proposeAction(item.id, {
+      const created = await blueAssetsApi.proposeCaseAction(item.id, {
         kind,
         target: actionTarget.trim(),
         rationale: actionRationale.trim(),
+        ...(actionAssetID ? { asset_id: Number(actionAssetID) } : {}),
       });
       setActions((current) => [created, ...current]);
       setActionTarget("");
+      setActionAssetID("");
       setActionRationale("");
       setCustomActionKind("");
       toast.success(copy.actionProposed);
@@ -383,17 +606,21 @@ function CaseDetailInner() {
             description={item.description || copy.casesDescription}
             actions={
               <>
-                <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    void load();
+                    void loadAssets();
+                  }}
+                  disabled={loading}
+                >
                   <RefreshCw className={loading ? "animate-spin" : ""} />
                   {copy.refresh}
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => void downloadReport()} disabled={reporting}>
                   <Download />
                   {reporting ? reportCopy.downloading : reportCopy.download}
-                </Button>
-                <Button size="sm" onClick={() => void analyze()} disabled={analyzing || hasActiveAnalysis}>
-                  <Bot />
-                  {analyzing ? copy.analyzing : hasActiveAnalysis ? copy.analysisRunning : copy.analyzeCase}
                 </Button>
               </>
             }
@@ -413,6 +640,133 @@ function CaseDetailInner() {
               </Button>
             ) : null}
           </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">{assetCopy.title}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">{assetCopy.description}</p>
+              {assetError && (
+                <p role="alert" className="text-sm text-destructive">
+                  {assetError}
+                </p>
+              )}
+              {assetSearchError && (
+                <p role="alert" className="text-sm text-destructive">
+                  {assetSearchError}
+                </p>
+              )}
+              {caseAssets.length === 0 ? (
+                <p className="text-sm text-muted-foreground">{assetCopy.none}</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {caseAssets.map((asset) => (
+                    <div key={asset.id} className="flex items-center gap-1 rounded-md border p-1 pl-2 text-sm">
+                      <Link
+                        href={`/blue/assets?asset=${asset.id}`}
+                        className="font-medium text-primary hover:underline"
+                      >
+                        {asset.label || asset.identifier}
+                      </Link>
+                      <span className="text-xs text-muted-foreground">#{asset.id}</span>
+                      {asset.explicit_link ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          aria-label={`${assetCopy.remove}: ${asset.label || asset.identifier}`}
+                          onClick={() => void unlinkAsset(asset.id)}
+                          disabled={unlinkingAssetID !== null}
+                        >
+                          {unlinkingAssetID === asset.id ? copy.loading : assetCopy.remove}
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">{assetCopy.eventLinked}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">{assetCopy.eventNote}</p>
+              <Input
+                value={assetSearch}
+                onChange={(event) => setAssetSearch(event.target.value)}
+                placeholder={assetCopy.search}
+                aria-label={assetCopy.search}
+              />
+              {assetSearching && <p className="text-xs text-muted-foreground">{copy.loading}</p>}
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-56 flex-1 space-y-1.5">
+                  <Label htmlFor="blue-case-asset">{assetCopy.choose}</Label>
+                  <select
+                    id="blue-case-asset"
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={assetChoice}
+                    onChange={(event) => {
+                      setAssetChoice(event.target.value);
+                      setChosenAsset(availableAssets.find((asset) => asset.id === Number(event.target.value)) ?? null);
+                    }}
+                    disabled={linkingAsset}
+                  >
+                    <option value="">{assetCopy.choose}</option>
+                    {[
+                      ...availableAssets,
+                      ...(chosenAsset && !availableAssets.some((asset) => asset.id === chosenAsset.id)
+                        ? [chosenAsset]
+                        : []),
+                    ]
+                      .filter(
+                        (asset) => asset.status === "active" && !caseAssets.some((linked) => linked.id === asset.id),
+                      )
+                      .map((asset) => (
+                        <option key={asset.id} value={asset.id}>
+                          {asset.label || asset.identifier} · {asset.kind} · #{asset.id}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <Button type="button" onClick={() => void linkAsset()} disabled={!assetChoice || linkingAsset}>
+                  {linkingAsset ? copy.loading : assetCopy.add}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+              <CardTitle className="text-base">{evidenceCopy.title}</CardTitle>
+              <Button size="sm" onClick={() => void analyze()} disabled={analyzing || hasActiveAnalysis}>
+                <Bot />
+                {analyzing ? copy.analyzing : hasActiveAnalysis ? copy.analysisRunning : copy.analyzeCase}
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">{evidenceCopy.hint}</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="blue-analysis-event-ids">{evidenceCopy.eventIDs}</Label>
+                  <Input
+                    id="blue-analysis-event-ids"
+                    value={analysisEventIDs}
+                    onChange={(event) => setAnalysisEventIDs(event.target.value)}
+                    placeholder={evidenceCopy.placeholder}
+                    disabled={analyzing || hasActiveAnalysis}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="blue-analysis-alert-ids">{evidenceCopy.alertIDs}</Label>
+                  <Input
+                    id="blue-analysis-alert-ids"
+                    value={analysisAlertIDs}
+                    onChange={(event) => setAnalysisAlertIDs(event.target.value)}
+                    placeholder={evidenceCopy.placeholder}
+                    disabled={analyzing || hasActiveAnalysis}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_19rem]">
             <div className="space-y-4">
@@ -452,8 +806,20 @@ function CaseDetailInner() {
                             <p className="mt-2 text-sm font-medium">{entry.event.message}</p>
                             <p className="mt-1 text-xs text-muted-foreground">
                               {entry.event.source} · {entry.event.event_type}
-                              {entry.event.asset ? ` · ${entry.event.asset}` : ""}
                             </p>
+                            {entry.event.asset && (
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {assetCopy.originalAsset}: {entry.event.asset}
+                              </p>
+                            )}
+                            {(entry.event as BlueAssetEvent).asset_id ? (
+                              <Link
+                                className="mt-1 inline-block text-primary text-xs underline-offset-4 hover:underline"
+                                href={`/blue/assets?asset=${(entry.event as BlueAssetEvent).asset_id}`}
+                              >
+                                {assetCopy.linkedAsset} #{(entry.event as BlueAssetEvent).asset_id}
+                              </Link>
+                            ) : null}
                             <details className="mt-2 text-xs">
                               <summary className="cursor-pointer text-primary">{copy.rawEvent}</summary>
                               <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-muted p-3 whitespace-pre-wrap break-all">
@@ -765,6 +1131,14 @@ function CaseDetailInner() {
                             </Badge>
                           </div>
                           <p className="mt-1 break-all">{action.target}</p>
+                          {(action as BlueAction & { asset_id?: number | null }).asset_id ? (
+                            <Link
+                              className="mt-1 inline-block text-primary text-xs underline-offset-4 hover:underline"
+                              href={`/blue/assets?asset=${(action as BlueAction & { asset_id?: number | null }).asset_id}`}
+                            >
+                              {assetCopy.linkedAsset} #{(action as BlueAction & { asset_id?: number | null }).asset_id}
+                            </Link>
+                          ) : null}
                           <p className="mt-1 text-xs text-muted-foreground">{action.rationale}</p>
                         </div>
                       ))}
@@ -805,6 +1179,25 @@ function CaseDetailInner() {
                         onChange={(event) => setActionTarget(event.target.value)}
                         required
                       />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="blue-action-asset">{assetCopy.actionAsset}</Label>
+                      <select
+                        id="blue-action-asset"
+                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        value={actionAssetID}
+                        onChange={(event) => setActionAssetID(event.target.value)}
+                        disabled={proposingAction}
+                      >
+                        <option value="">{assetCopy.noActionAsset}</option>
+                        {caseAssets
+                          .filter((asset) => asset.status === "active")
+                          .map((asset) => (
+                            <option key={asset.id} value={asset.id}>
+                              {asset.label || asset.identifier} · #{asset.id}
+                            </option>
+                          ))}
+                      </select>
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="blue-action-rationale">{copy.actionRationale}</Label>

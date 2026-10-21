@@ -5,13 +5,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 from threading import Lock
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 
 PORT = 8080
 LOG_PATH = Path("/logs/access.jsonl")
 LOG_LOCK = Lock()
+FEED_MAX_RECORDS = 500
+FEED_MAX_BYTES = 8 << 20
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -26,6 +28,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _respond(self, *, include_body: bool):
         route = urlsplit(self.path).path
+        if route == "/logs/events":
+            self._feed(include_body=include_body)
+            return
         if self.command not in ("GET", "HEAD"):
             status, mime, payload = 405, "application/json", {"error": "method not allowed"}
         elif route == "/health":
@@ -69,6 +74,76 @@ class Handler(BaseHTTPRequestHandler):
         # Health probes run every five seconds; they are not investigation data.
         if route != "/health":
             self._record(route, status)
+
+    def _feed(self, *, include_body: bool):
+        if self.command not in ("GET", "HEAD"):
+            self._feed_error(405, "method not allowed")
+            return
+        query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+        values = query.get("cursor", ["0"])
+        if len(values) != 1 or not values[0].isascii() or not values[0].isdigit() or len(values[0]) > 18:
+            self._feed_error(400, "cursor must be a non-negative byte offset")
+            return
+        cursor = int(values[0])
+        try:
+            body, next_cursor = self._feed_page(cursor)
+        except ValueError as error:
+            self._feed_error(400, str(error))
+            return
+        except OSError:
+            self._feed_error(500, "event log unavailable")
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-ARTEX-Next-Cursor", str(next_cursor))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if include_body:
+            self.wfile.write(body)
+
+    def _feed_page(self, cursor: int) -> tuple[bytes, int]:
+        with LOG_LOCK:
+            if not LOG_PATH.exists():
+                return b"", 0
+            with LOG_PATH.open("rb") as source:
+                source.seek(0, 2)
+                size = source.tell()
+                if cursor > size:
+                    # A rotated/truncated log is replayed from the start. Stable
+                    # external IDs make the import idempotent.
+                    cursor = 0
+                if cursor:
+                    source.seek(cursor - 1)
+                    if source.read(1) != b"\n":
+                        raise ValueError("cursor must point to a line boundary")
+                source.seek(cursor)
+                chunks: list[bytes] = []
+                length = 0
+                for _ in range(FEED_MAX_RECORDS):
+                    line = source.readline(FEED_MAX_BYTES + 1)
+                    if not line:
+                        break
+                    if len(line) > FEED_MAX_BYTES:
+                        raise ValueError("event log contains an oversized record")
+                    if not line.endswith(b"\n"):
+                        break  # The writer has not finished this record yet.
+                    if length + len(line) > FEED_MAX_BYTES:
+                        break
+                    chunks.append(line)
+                    length += len(line)
+                    cursor = source.tell()
+                return b"".join(chunks), cursor
+
+    def _feed_error(self, status: int, message: str):
+        body = json.dumps({"error": message}).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
     def _record(self, route: str, status: int):
         disclosure = route == "/debug/config" and status == 200

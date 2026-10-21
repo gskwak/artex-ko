@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"iter"
 	"net/http"
 	"os"
@@ -247,6 +248,146 @@ func TestBlueChatIsScopedAndToolFreePG(t *testing.T) {
 		if item.Kind == "tool_use" || item.Kind == "tool_result" {
 			t.Fatalf("Blue Chat persisted an executable tool step: %+v", item)
 		}
+	}
+}
+
+func TestBlueChatSelectsOlderCaseEvidencePG(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("ARTEX_BLUE_TEST_PG_DSN"))
+	if dsn == "" {
+		t.Skip("set ARTEX_BLUE_TEST_PG_DSN to a disposable PostgreSQL test database")
+	}
+	pg, err := db.Open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pg.Close() })
+	ctx := context.Background()
+	caseItem, err := pg.CreateBlueCase(ctx, db.BlueCase{Title: "Older evidence selection", Status: "open", Severity: "medium"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherCase, err := pg.CreateBlueCase(ctx, db.BlueCase{Title: "Other evidence selection", Status: "open", Severity: "medium"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, err := pg.CreateBlueRule(ctx, db.BlueRule{Name: "Older evidence selection", Field: "event_type", Value: "http", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var allEvents []db.BlueEvent
+	t.Cleanup(func() {
+		_, _ = pg.Exec(`DELETE FROM blue_alerts WHERE rule_id=$1`, rule.ID)
+		_, _ = pg.Exec(`DELETE FROM blue_rules WHERE id=$1`, rule.ID)
+		for _, event := range allEvents {
+			_, _ = pg.Exec(`DELETE FROM blue_events WHERE id=$1`, event.ID)
+		}
+		_, _ = pg.Exec(`DELETE FROM blue_cases WHERE id IN ($1,$2)`, caseItem.ID, otherCase.ID)
+	})
+	base := time.Now().UTC().Add(-time.Hour)
+	eventsToImport := []db.BlueEvent{
+		{CaseID: &caseItem.ID, Source: "selected-chat-evidence", EventType: "http", Severity: "medium",
+			Message: "OLD-SELECTED-EVENT", OccurredAt: base, Raw: json.RawMessage(`{"path":"/old"}`)},
+		{CaseID: &otherCase.ID, Source: "selected-chat-evidence", EventType: "http", Severity: "medium",
+			Message: "PRIVATE-OTHER-CASE-EVENT", OccurredAt: base.Add(time.Second), Raw: json.RawMessage(`{"path":"/private"}`)},
+	}
+	for i := 0; i < blueChatEvidenceEvents+2; i++ {
+		eventsToImport = append(eventsToImport, db.BlueEvent{CaseID: &caseItem.ID, Source: "selected-chat-evidence", EventType: "http",
+			Severity: "info", Message: fmt.Sprintf("newer event %d", i), OccurredAt: base.Add(time.Duration(i+2) * time.Second),
+			Raw: json.RawMessage(`{"path":"/recent"}`)})
+	}
+	allEvents, err = pg.ImportBlueEvents(ctx, eventsToImport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alerts := make([]*db.BlueAlert, 0, len(allEvents))
+	for _, event := range allEvents {
+		alert, err := pg.UpsertBlueAlert(ctx, db.BlueAlert{RuleID: rule.ID, EventID: event.ID, CaseID: event.CaseID,
+			Reason: "alert for " + event.Message})
+		if err != nil {
+			t.Fatal(err)
+		}
+		alerts = append(alerts, alert)
+	}
+	provider := &blueChatTestProvider{}
+	s := &Server{m: &Manager{pg: pg}, ctx: ctx, jwtKey: []byte(strings.Repeat("s", 32)), llmOn: true, llmProv: provider}
+	h := s.Handler()
+	token, err := signJWT(s.signingKey(s.readPassHash()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var conv db.Conversation
+	blueAPIRequest(t, h, token, http.MethodPost, "/api/blue/conversations", map[string]any{"title": "selected-evidence-test"}, http.StatusOK, &conv)
+	t.Cleanup(func() { _ = pg.DeleteConversation(conv.ID) })
+	path := "/api/blue/conversations/" + i64s(conv.ID) + "/messages"
+	blueAPIRequest(t, h, token, http.MethodPost, path, map[string]any{"message": "No case", "event_ids": []int64{allEvents[0].ID}}, http.StatusBadRequest, nil)
+	blueAPIRequest(t, h, token, http.MethodPost, path, map[string]any{"message": "Wrong event", "case_id": caseItem.ID, "event_ids": []int64{allEvents[1].ID}}, http.StatusBadRequest, nil)
+	blueAPIRequest(t, h, token, http.MethodPost, path, map[string]any{"message": "Wrong alert", "case_id": caseItem.ID, "alert_ids": []int64{alerts[1].ID}}, http.StatusBadRequest, nil)
+	blueAPIRequest(t, h, token, http.MethodPost, path, map[string]any{"message": "Duplicate", "case_id": caseItem.ID, "event_ids": []int64{allEvents[0].ID, allEvents[0].ID}}, http.StatusBadRequest, nil)
+	blueAPIRequest(t, h, token, http.MethodPost, path, map[string]any{"message": "Too many", "case_id": caseItem.ID, "event_ids": make([]int64, blueChatEvidenceEvents+1)}, http.StatusBadRequest, nil)
+	if len(provider.snapshot()) != 0 {
+		t.Fatal("invalid evidence reached the model")
+	}
+	blueAPIRequest(t, h, token, http.MethodPost, path, map[string]any{"message": "Investigate this old record", "case_id": caseItem.ID,
+		"event_ids": []int64{allEvents[0].ID}, "alert_ids": []int64{alerts[0].ID}}, http.StatusAccepted, nil)
+	waitBlueChatIdle(t, h, token, "/api/blue/conversations/"+i64s(conv.ID))
+	requests := provider.snapshot()
+	if len(requests) != 1 {
+		t.Fatalf("expected one model request, got %d", len(requests))
+	}
+	var prompt string
+	for _, message := range requests[0].Messages {
+		prompt += message.Text()
+	}
+	if !strings.Contains(prompt, "OLD-SELECTED-EVENT") || !strings.Contains(prompt, "alert for OLD-SELECTED-EVENT") ||
+		strings.Contains(prompt, "PRIVATE-OTHER-CASE-EVENT") || !strings.Contains(prompt, `"selected_event_ids"`) {
+		t.Fatalf("selected case evidence missing or crossed case boundary: %q", prompt)
+	}
+	var messages struct {
+		Items []ActivityDTO `json:"items"`
+	}
+	blueAPIRequest(t, h, token, http.MethodGet, path, nil, http.StatusOK, &messages)
+	var selected struct {
+		BlueCase struct {
+			EventIDs         []int64 `json:"event_ids"`
+			AlertIDs         []int64 `json:"alert_ids"`
+			SelectedEventIDs []int64 `json:"selected_event_ids"`
+			SelectedAlertIDs []int64 `json:"selected_alert_ids"`
+		} `json:"blue_case"`
+	}
+	for _, item := range messages.Items {
+		if item.Kind == "user" && item.Summary == "Investigate this old record" {
+			if err := json.Unmarshal(item.Metadata, &selected); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if len(selected.BlueCase.SelectedEventIDs) != 1 || selected.BlueCase.SelectedEventIDs[0] != allEvents[0].ID ||
+		len(selected.BlueCase.SelectedAlertIDs) != 1 || selected.BlueCase.SelectedAlertIDs[0] != alerts[0].ID ||
+		len(selected.BlueCase.EventIDs) != blueChatEvidenceEvents || len(selected.BlueCase.AlertIDs) != blueChatEvidenceAlerts {
+		t.Fatalf("selected provenance missing: %+v", selected)
+	}
+	largeRaw, err := json.Marshal(map[string]string{"blob": strings.Repeat("界", 600)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	largeRecords := make([]db.BlueEvent, 0, blueChatEvidenceEvents)
+	for i := 0; i < blueChatEvidenceEvents; i++ {
+		largeRecords = append(largeRecords, db.BlueEvent{CaseID: &caseItem.ID, Source: "selected-chat-evidence", EventType: "http",
+			Severity: "info", Message: strings.Repeat("界", 600), OccurredAt: base.Add(time.Duration(i+100) * time.Second), Raw: largeRaw})
+	}
+	largeStored, err := pg.ImportBlueEvents(ctx, largeRecords)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allEvents = append(allEvents, largeStored...)
+	largeIDs := make([]int64, 0, len(largeStored))
+	for _, event := range largeStored {
+		largeIDs = append(largeIDs, event.ID)
+	}
+	blueAPIRequest(t, h, token, http.MethodPost, path, map[string]any{"message": "Do not silently drop my selected evidence", "case_id": caseItem.ID,
+		"event_ids": largeIDs}, http.StatusBadRequest, nil)
+	if len(provider.snapshot()) != 1 {
+		t.Fatal("oversized selected evidence reached the model")
 	}
 }
 

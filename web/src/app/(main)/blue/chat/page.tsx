@@ -56,6 +56,7 @@ import { api } from "@/lib/api";
 import { type BlueCase, blueApi } from "@/lib/blue-api";
 import { blueChatApi } from "@/lib/blue-chat-api";
 import { useBlueChatCopy } from "@/lib/blue-chat-copy";
+import { parseBlueEvidenceIDs } from "@/lib/blue-evidence-ids";
 import { shouldSubmitOnKey, useChatSendMode } from "@/lib/chat-send-mode";
 import type { Activity, Conversation, LLMProfile } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -202,6 +203,61 @@ function CaseEvidencePicker({
           <X className="size-3.5" />
         </Button>
       )}
+    </div>
+  );
+}
+
+function EvidenceIDInputs({
+  caseSelected,
+  eventIDs,
+  alertIDs,
+  onEventIDsChange,
+  onAlertIDsChange,
+  disabled,
+}: {
+  caseSelected: boolean;
+  eventIDs: string;
+  alertIDs: string;
+  onEventIDsChange: (value: string) => void;
+  onAlertIDsChange: (value: string) => void;
+  disabled?: boolean;
+}) {
+  const copy = useBlueChatCopy();
+  const inputID = React.useId();
+  const invalidEvent = caseSelected && eventIDs.trim() !== "" && parseBlueEvidenceIDs(eventIDs) === null;
+  const invalidAlert = caseSelected && alertIDs.trim() !== "" && parseBlueEvidenceIDs(alertIDs) === null;
+  const invalid = invalidEvent || invalidAlert;
+  return (
+    <div className="space-y-1.5">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label htmlFor={`${inputID}-events`} className="space-y-1 text-xs text-muted-foreground">
+          <span>{copy.evidenceEventIDs}</span>
+          <Input
+            id={`${inputID}-events`}
+            value={eventIDs}
+            onChange={(event) => onEventIDsChange(event.target.value)}
+            placeholder="1, 2, 3"
+            disabled={!caseSelected || disabled}
+            aria-invalid={invalidEvent}
+            className="h-8 text-xs"
+          />
+        </label>
+        <label htmlFor={`${inputID}-alerts`} className="space-y-1 text-xs text-muted-foreground">
+          <span>{copy.evidenceAlertIDs}</span>
+          <Input
+            id={`${inputID}-alerts`}
+            value={alertIDs}
+            onChange={(event) => onAlertIDsChange(event.target.value)}
+            placeholder="1, 2, 3"
+            disabled={!caseSelected || disabled}
+            aria-invalid={invalidAlert}
+            className="h-8 text-xs"
+          />
+        </label>
+      </div>
+      <p className={cn("text-[11px] text-muted-foreground", invalid && "text-destructive")}>
+        {invalid ? copy.evidenceIDsInvalid : caseSelected ? copy.evidenceIDsHint : copy.evidenceIDsNeedsCase}
+      </p>
     </div>
   );
 }
@@ -381,6 +437,8 @@ function ConversationView({
   const [busy, setBusy] = React.useState(false);
   const [input, setInput] = React.useState("");
   const [attachedCase, setAttachedCase] = React.useState<CaseSelection | null>(null);
+  const [eventIDsInput, setEventIDsInput] = React.useState("");
+  const [alertIDsInput, setAlertIDsInput] = React.useState("");
   const [profileBusy, setProfileBusy] = React.useState(false);
   const cursorRef = React.useRef(0);
   const earliestRef = React.useRef(0);
@@ -510,10 +568,21 @@ function ConversationView({
   async function send() {
     const message = input.trim();
     if (!message || busy || running) return;
+    const eventIDs = parseBlueEvidenceIDs(eventIDsInput);
+    const alertIDs = parseBlueEvidenceIDs(alertIDsInput);
+    if (attachedCase && (eventIDs === null || alertIDs === null)) {
+      toast.error(copy.evidenceIDsInvalid);
+      return;
+    }
     setInput("");
     setBusy(true);
     try {
-      await blueChatApi.send(conversation.id, message, attachedCase?.id);
+      await blueChatApi.send(
+        conversation.id,
+        message,
+        attachedCase?.id,
+        attachedCase ? { event_ids: eventIDs ?? [], alert_ids: alertIDs ?? [] } : undefined,
+      );
       wasRunningRef.current = true;
       setRunning(true);
       onUpdated();
@@ -595,7 +664,25 @@ function ConversationView({
         busy={busy}
         running={running}
         evidenceSlot={
-          <CaseEvidencePicker selected={attachedCase} onChange={setAttachedCase} disabled={busy || running} />
+          <div className="space-y-2">
+            <CaseEvidencePicker
+              selected={attachedCase}
+              onChange={(item) => {
+                setAttachedCase(item);
+                setEventIDsInput("");
+                setAlertIDsInput("");
+              }}
+              disabled={busy || running}
+            />
+            <EvidenceIDInputs
+              caseSelected={attachedCase !== null}
+              eventIDs={eventIDsInput}
+              alertIDs={alertIDsInput}
+              onEventIDsChange={setEventIDsInput}
+              onAlertIDsChange={setAlertIDsInput}
+              disabled={busy || running}
+            />
+          </div>
         }
       />
       <ModelPicker
@@ -618,15 +705,28 @@ function DraftView({
   const copy = useBlueChatCopy();
   const [input, setInput] = React.useState("");
   const [attachedCase, setAttachedCase] = React.useState<CaseSelection | null>(null);
+  const [eventIDsInput, setEventIDsInput] = React.useState("");
+  const [alertIDsInput, setAlertIDsInput] = React.useState("");
   const [profileID, setProfileID] = React.useState<number | null>(null);
   const [busy, setBusy] = React.useState(false);
   async function send() {
     const message = input.trim();
     if (!message || busy) return;
+    const eventIDs = parseBlueEvidenceIDs(eventIDsInput);
+    const alertIDs = parseBlueEvidenceIDs(alertIDsInput);
+    if (attachedCase && (eventIDs === null || alertIDs === null)) {
+      toast.error(copy.evidenceIDsInvalid);
+      return;
+    }
     setBusy(true);
     try {
       const conversation = await blueChatApi.createConversation("", profileID);
-      await blueChatApi.send(conversation.id, message, attachedCase?.id);
+      await blueChatApi.send(
+        conversation.id,
+        message,
+        attachedCase?.id,
+        attachedCase ? { event_ids: eventIDs ?? [], alert_ids: alertIDs ?? [] } : undefined,
+      );
       setInput("");
       onStarted({ ...conversation, running: true });
     } catch (cause) {
@@ -651,7 +751,27 @@ function DraftView({
         onSend={() => void send()}
         busy={busy}
         running={false}
-        evidenceSlot={<CaseEvidencePicker selected={attachedCase} onChange={setAttachedCase} disabled={busy} />}
+        evidenceSlot={
+          <div className="space-y-2">
+            <CaseEvidencePicker
+              selected={attachedCase}
+              onChange={(item) => {
+                setAttachedCase(item);
+                setEventIDsInput("");
+                setAlertIDsInput("");
+              }}
+              disabled={busy}
+            />
+            <EvidenceIDInputs
+              caseSelected={attachedCase !== null}
+              eventIDs={eventIDsInput}
+              alertIDs={alertIDsInput}
+              onEventIDsChange={setEventIDsInput}
+              onAlertIDsChange={setAlertIDsInput}
+              disabled={busy}
+            />
+          </div>
+        }
         leftSlot={
           <div className="flex h-9 w-full items-center gap-2 rounded-md border bg-background px-3 text-sm sm:w-40">
             <Bot className="size-3.5" />

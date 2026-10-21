@@ -204,9 +204,11 @@ type Server struct {
 
 	// Cold task archives run through one persistent FIFO worker. The buffered wake
 	// channel coalesces enqueue bursts; the database remains the source of truth.
-	archiveWake chan struct{}
-	archiveWG   sync.WaitGroup
-	side        *sideQuestionState
+	archiveWake       chan struct{}
+	archiveWG         sync.WaitGroup
+	blueSourceSyncMu  sync.Mutex
+	blueSourceSyncing map[int64]bool
+	side              *sideQuestionState
 	// outputLang caches the resolved user-facing output language (string). Every
 	// writeErr, label and agent turn reads it, so it must not hit the settings
 	// table or config.json per call; putSettings refreshes it on change.
@@ -242,7 +244,8 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		triggerActive: map[string]int{}, triggerCfg: map[string]triggerBehavior{},
 		profChatAgents: map[int64]*agent.ChatAgent{},
 		provByProfile:  map[int64]*provEntry{}, llmHealth: newLLMHealthRegistry(m.pg),
-		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1)}
+		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1),
+		blueSourceSyncing: map[int64]bool{}}
 	// First-run protection: cache the password hash and, while none is set, issue
 	// the console setup token (or apply ARTEX_ADMIN_PASSWORD) before any request.
 	s.bootstrapAuth()
@@ -374,6 +377,9 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	s.startTaskArchiveWorker()
 	s.wireInterceptReviewer() // LLM fallback approval: let the model judge commands unmatched by intercept rules.
 	s.recoverBlueAnalyses()   // Previous-process jobs no longer have a running analyst.
+	if m.pg != nil {
+		go s.runBlueSourcePoller(s.ctx)
+	}
 	return s
 }
 

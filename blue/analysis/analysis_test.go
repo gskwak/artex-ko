@@ -140,6 +140,25 @@ func TestAnalyzeBoundsTotalEvidenceAndMarksPartialReview(t *testing.T) {
 	}
 }
 
+func TestSelectedEvidenceMustSurviveInputBudget(t *testing.T) {
+	in := fixture()
+	for id := int64(12); id <= 50; id++ {
+		in.Events = append(in.Events, Event{ID: id, Message: strings.Repeat("x", 3000),
+			Raw: json.RawMessage(`{"data":"` + strings.Repeat("y", 3000) + `"}`)})
+	}
+	in.SelectedEventIDs = []int64{11}
+	if !FitsSelectedEvidence(in) {
+		t.Fatal("selected event at the front should survive clipping")
+	}
+	in.SelectedEventIDs = []int64{50}
+	if FitsSelectedEvidence(in) {
+		t.Fatal("accepted a selected event that total-input clipping would remove")
+	}
+	if _, err := Analyze(t.Context(), &captureProvider{output: validReply}, in, 0); err == nil {
+		t.Fatal("analysis silently omitted selected evidence")
+	}
+}
+
 func TestAnalyzeNeedsEvidence(t *testing.T) {
 	p := &captureProvider{output: validReply}
 	if _, err := Analyze(t.Context(), p, Input{CaseID: 1}, 0); err == nil {

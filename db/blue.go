@@ -47,6 +47,7 @@ const blueEventImportLockKey int64 = 7337741003
 type BlueEvent struct {
 	ID         int64           `json:"id"`
 	CaseID     *int64          `json:"case_id,omitempty"`
+	AssetID    *int64          `json:"asset_id,omitempty"`
 	Source     string          `json:"source"`
 	ExternalID string          `json:"external_id,omitempty"`
 	EventType  string          `json:"event_type"`
@@ -122,6 +123,7 @@ type BlueObservation struct {
 type BlueAction struct {
 	ID                 int64           `json:"id"`
 	CaseID             int64           `json:"case_id"`
+	AssetID            *int64          `json:"asset_id,omitempty"`
 	Kind               string          `json:"kind"`
 	Target             string          `json:"target"`
 	Rationale          string          `json:"rationale"`
@@ -149,15 +151,17 @@ type BlueOverview struct {
 }
 
 type BlueAnalysisRun struct {
-	ID             int64      `json:"id"`
-	CaseID         int64      `json:"case_id"`
-	Status         string     `json:"status"`
-	ModelProfileID *int64     `json:"model_profile_id,omitempty"`
-	ObservationID  *int64     `json:"observation_id,omitempty"`
-	Error          string     `json:"error"`
-	CreatedAt      time.Time  `json:"created_at"`
-	StartedAt      *time.Time `json:"started_at,omitempty"`
-	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+	ID               int64      `json:"id"`
+	CaseID           int64      `json:"case_id"`
+	Status           string     `json:"status"`
+	SelectedEventIDs []int64    `json:"selected_event_ids,omitempty"`
+	SelectedAlertIDs []int64    `json:"selected_alert_ids,omitempty"`
+	ModelProfileID   *int64     `json:"model_profile_id,omitempty"`
+	ObservationID    *int64     `json:"observation_id,omitempty"`
+	Error            string     `json:"error"`
+	CreatedAt        time.Time  `json:"created_at"`
+	StartedAt        *time.Time `json:"started_at,omitempty"`
+	FinishedAt       *time.Time `json:"finished_at,omitempty"`
 }
 
 type blueRow interface{ Scan(...any) error }
@@ -287,16 +291,19 @@ func (d *DB) PatchBlueCase(ctx context.Context, id int64, p BlueCasePatch) (*Blu
 		blueOptionalString(p.Severity), blueOptionalString(p.Summary)))
 }
 
-const blueEventColumns = `id,case_id,source,COALESCE(external_id,''),event_type,severity,asset,message,occurred_at,raw,created_at`
+const blueEventColumns = `id,case_id,asset_id,source,COALESCE(external_id,''),event_type,severity,asset,message,occurred_at,raw,created_at`
 
 func scanBlueEvent(row blueRow) (*BlueEvent, error) {
 	e := &BlueEvent{}
-	var caseID sql.NullInt64
-	if err := row.Scan(&e.ID, &caseID, &e.Source, &e.ExternalID, &e.EventType, &e.Severity, &e.Asset, &e.Message, &e.OccurredAt, &e.Raw, &e.CreatedAt); err != nil {
+	var caseID, assetID sql.NullInt64
+	if err := row.Scan(&e.ID, &caseID, &assetID, &e.Source, &e.ExternalID, &e.EventType, &e.Severity, &e.Asset, &e.Message, &e.OccurredAt, &e.Raw, &e.CreatedAt); err != nil {
 		return nil, err
 	}
 	if caseID.Valid {
 		e.CaseID = &caseID.Int64
+	}
+	if assetID.Valid {
+		e.AssetID = &assetID.Int64
 	}
 	return e, nil
 }
@@ -333,13 +340,29 @@ func (d *DB) ImportBlueEvents(ctx context.Context, events []BlueEvent) (_ []Blue
 		if jerr != nil {
 			return nil, jerr
 		}
+		// A replay must preserve the originally imported asset attribution even
+		// if the caller sends a different ID or the original asset is archived.
+		if e.ExternalID != "" {
+			original, qerr := scanBlueEvent(tx.QueryRowContext(ctx, `SELECT `+blueEventColumns+`
+				FROM blue_events WHERE source=$1 AND external_id=$2`, e.Source, e.ExternalID))
+			if qerr == nil {
+				out = append(out, *original)
+				continue
+			}
+			if !errors.Is(qerr, sql.ErrNoRows) {
+				return nil, qerr
+			}
+		}
+		if err := blueRequireActiveAssetTx(ctx, tx, e.AssetID); err != nil {
+			return nil, err
+		}
 		stored, qerr := scanBlueEvent(tx.QueryRowContext(ctx, `INSERT INTO blue_events
-			(case_id,source,external_id,event_type,severity,asset,message,occurred_at,raw)
-			VALUES ($1,$2,NULLIF($3,''),$4,$5,$6,$7,$8,$9::jsonb)
+			(case_id,asset_id,source,external_id,event_type,severity,asset,message,occurred_at,raw)
+			VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,$7,$8,$9,$10::jsonb)
 			ON CONFLICT (source,external_id) WHERE external_id IS NOT NULL AND external_id <> ''
 			DO NOTHING
 			RETURNING `+blueEventColumns,
-			e.CaseID, e.Source, e.ExternalID, e.EventType, e.Severity, e.Asset, e.Message, e.OccurredAt, raw))
+			e.CaseID, e.AssetID, e.Source, e.ExternalID, e.EventType, e.Severity, e.Asset, e.Message, e.OccurredAt, raw))
 		if errors.Is(qerr, sql.ErrNoRows) && e.ExternalID != "" {
 			stored, qerr = scanBlueEvent(tx.QueryRowContext(ctx, `SELECT `+blueEventColumns+`
 				FROM blue_events WHERE source=$1 AND external_id=$2`, e.Source, e.ExternalID))
@@ -931,15 +954,19 @@ func (d *DB) ListBlueObservations(ctx context.Context, caseID int64, limit, offs
 	return out, rows.Err()
 }
 
-const blueActionColumns = `id,case_id,kind,target,rationale,params,status,decision_note,requested_by,decided_by,completion_note,completion_evidence,completed_by,created_at,decided_at,completed_at`
+const blueActionColumns = `id,case_id,asset_id,kind,target,rationale,params,status,decision_note,requested_by,decided_by,completion_note,completion_evidence,completed_by,created_at,decided_at,completed_at`
 
 func scanBlueAction(row blueRow) (*BlueAction, error) {
 	a := &BlueAction{}
+	var assetID sql.NullInt64
 	var decided, completed sql.NullTime
-	if err := row.Scan(&a.ID, &a.CaseID, &a.Kind, &a.Target, &a.Rationale, &a.Params,
+	if err := row.Scan(&a.ID, &a.CaseID, &assetID, &a.Kind, &a.Target, &a.Rationale, &a.Params,
 		&a.Status, &a.DecisionNote, &a.RequestedBy, &a.DecidedBy,
 		&a.CompletionNote, &a.CompletionEvidence, &a.CompletedBy, &a.CreatedAt, &decided, &completed); err != nil {
 		return nil, err
+	}
+	if assetID.Valid {
+		a.AssetID = &assetID.Int64
 	}
 	if decided.Valid {
 		a.DecidedAt = &decided.Time
@@ -958,10 +985,31 @@ func (d *DB) CreateBlueAction(ctx context.Context, a BlueAction) (*BlueAction, e
 	if a.RequestedBy == "" {
 		a.RequestedBy = "analyst"
 	}
-	return scanBlueAction(d.QueryRowContext(ctx, `INSERT INTO blue_actions
-		(case_id,kind,target,rationale,params,requested_by)
-		VALUES ($1,$2,$3,$4,$5::jsonb,$6) RETURNING `+blueActionColumns,
-		a.CaseID, a.Kind, a.Target, a.Rationale, params, a.RequestedBy))
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err := blueRequireActiveAssetTx(ctx, tx, a.AssetID); err != nil {
+		return nil, err
+	}
+	if a.AssetID != nil {
+		linked, err := blueCaseHasAssetTx(ctx, tx, a.CaseID, *a.AssetID)
+		if err != nil {
+			return nil, err
+		}
+		if !linked {
+			return nil, ErrBlueAssetNotInCase
+		}
+	}
+	created, err := scanBlueAction(tx.QueryRowContext(ctx, `INSERT INTO blue_actions
+		(case_id,asset_id,kind,target,rationale,params,requested_by)
+		VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7) RETURNING `+blueActionColumns,
+		a.CaseID, a.AssetID, a.Kind, a.Target, a.Rationale, params, a.RequestedBy))
+	if err != nil {
+		return nil, err
+	}
+	return created, tx.Commit()
 }
 
 func (d *DB) ListBlueActions(ctx context.Context, caseID *int64, status string, limit, offset int) ([]BlueAction, error) {
@@ -1059,15 +1107,22 @@ func (d *DB) BlueOverview(ctx context.Context) (*BlueOverview, error) {
 	return o, nil
 }
 
-const blueAnalysisColumns = `id,case_id,status,model_profile_id,observation_id,error,created_at,started_at,finished_at`
+const blueAnalysisColumns = `id,case_id,status,model_profile_id,observation_id,error,created_at,started_at,finished_at,selected_event_ids,selected_alert_ids`
 
 func scanBlueAnalysisRun(row blueRow) (*BlueAnalysisRun, error) {
 	r := &BlueAnalysisRun{}
 	var modelID, observationID sql.NullInt64
 	var started, finished sql.NullTime
+	var selectedEvents, selectedAlerts []byte
 	if err := row.Scan(&r.ID, &r.CaseID, &r.Status, &modelID, &observationID, &r.Error,
-		&r.CreatedAt, &started, &finished); err != nil {
+		&r.CreatedAt, &started, &finished, &selectedEvents, &selectedAlerts); err != nil {
 		return nil, err
+	}
+	if err := json.Unmarshal(selectedEvents, &r.SelectedEventIDs); err != nil {
+		return nil, fmt.Errorf("decode selected analysis events: %w", err)
+	}
+	if err := json.Unmarshal(selectedAlerts, &r.SelectedAlertIDs); err != nil {
+		return nil, fmt.Errorf("decode selected analysis alerts: %w", err)
 	}
 	if modelID.Valid {
 		r.ModelProfileID = &modelID.Int64
@@ -1085,8 +1140,28 @@ func scanBlueAnalysisRun(row blueRow) (*BlueAnalysisRun, error) {
 }
 
 func (d *DB) CreateBlueAnalysisRun(ctx context.Context, caseID int64, profileID *int64) (*BlueAnalysisRun, error) {
-	r, err := scanBlueAnalysisRun(d.QueryRowContext(ctx, `INSERT INTO blue_analysis_runs (case_id,model_profile_id)
-		VALUES ($1,$2) RETURNING `+blueAnalysisColumns, caseID, profileID))
+	return d.CreateBlueAnalysisRunWithSelection(ctx, caseID, profileID, nil, nil)
+}
+
+// CreateBlueAnalysisRunWithSelection preserves the analyst's requested focus
+// so a completed run can be audited against the evidence the model received.
+func (d *DB) CreateBlueAnalysisRunWithSelection(ctx context.Context, caseID int64, profileID *int64, eventIDs, alertIDs []int64) (*BlueAnalysisRun, error) {
+	if eventIDs == nil {
+		eventIDs = []int64{}
+	}
+	if alertIDs == nil {
+		alertIDs = []int64{}
+	}
+	eventsJSON, err := json.Marshal(eventIDs)
+	if err != nil {
+		return nil, err
+	}
+	alertsJSON, err := json.Marshal(alertIDs)
+	if err != nil {
+		return nil, err
+	}
+	r, err := scanBlueAnalysisRun(d.QueryRowContext(ctx, `INSERT INTO blue_analysis_runs (case_id,model_profile_id,selected_event_ids,selected_alert_ids)
+		VALUES ($1,$2,$3::jsonb,$4::jsonb) RETURNING `+blueAnalysisColumns, caseID, profileID, string(eventsJSON), string(alertsJSON)))
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "idx_blue_analysis_runs_active_case" {
 		return nil, ErrBlueConflict

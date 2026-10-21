@@ -14,8 +14,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useActiveLocale } from "@/i18n/locale-store";
 import { ApiError } from "@/lib/api";
 import { type BlueCase, type BlueEvent, type BlueImportResult, type BlueSeverity, blueApi } from "@/lib/blue-api";
+import { type BlueAsset, type BlueAssetEvent, blueAssetsApi } from "@/lib/blue-assets-api";
 import { blueSeverityLabel, useBlueCopy } from "@/lib/blue-copy";
 
+import { BlueSourcesPanel } from "../_components/blue-sources-panel";
 import { BlueEmpty, BlueError, BlueLoading, BluePageHeader, BlueSeverityBadge, blueDate } from "../_components/blue-ui";
 import { BlueInvestigationTabs } from "../_components/investigation-tabs";
 
@@ -42,6 +44,16 @@ const eventLabels = {
       "This event or a related alert is cited as evidence. Review its references before changing the case.",
     createCase: "Create a case",
     noCases: "No cases are available yet.",
+    linkedAsset: "Linked Blue asset",
+    observedAsset: "Observed asset text",
+    noLinkedAsset: "No asset linked",
+    saveAssetLink: "Save asset link",
+    assetLinked: "Event asset link saved.",
+    assetLinkFailed: "Could not update the asset link.",
+    assetsUnavailable: "Could not load Blue assets.",
+    archivedAsset: "archived",
+    manageAssets: "Manage assets",
+    searchAssets: "Search Blue assets to link",
   },
   ko: {
     eventsSaved: "저장된 이벤트",
@@ -60,6 +72,16 @@ const eventLabels = {
     caseMoveConflict: "이 이벤트 또는 관련 경보가 이미 증거로 인용됐습니다. 사건을 바꾸기 전에 증거 참조를 확인하세요.",
     createCase: "사건 만들기",
     noCases: "아직 사건이 없습니다.",
+    linkedAsset: "연결된 블루팀 자산",
+    observedAsset: "원본 자산 문자열",
+    noLinkedAsset: "연결된 자산 없음",
+    saveAssetLink: "자산 연결 저장",
+    assetLinked: "이벤트 자산 연결을 저장했습니다.",
+    assetLinkFailed: "자산 연결을 변경하지 못했습니다.",
+    assetsUnavailable: "블루팀 자산 목록을 불러오지 못했습니다.",
+    archivedAsset: "보관됨",
+    manageAssets: "자산 관리",
+    searchAssets: "연결할 블루팀 자산 검색",
   },
   zh: {
     eventsSaved: "已保存事件",
@@ -78,6 +100,16 @@ const eventLabels = {
     caseMoveConflict: "该事件或相关告警已被引用为证据。更改案件前请检查证据引用。",
     createCase: "创建案件",
     noCases: "尚无可用案件。",
+    linkedAsset: "关联的蓝队资产",
+    observedAsset: "原始资产文本",
+    noLinkedAsset: "未关联资产",
+    saveAssetLink: "保存资产关联",
+    assetLinked: "已保存事件资产关联。",
+    assetLinkFailed: "无法更新资产关联。",
+    assetsUnavailable: "无法加载蓝队资产。",
+    archivedAsset: "已归档",
+    manageAssets: "管理资产",
+    searchAssets: "搜索要关联的蓝队资产",
   },
   es: {
     eventsSaved: "Eventos guardados",
@@ -97,6 +129,16 @@ const eventLabels = {
       "Este evento o una alerta relacionada ya se cita como evidencia. Revise sus referencias antes de cambiar el caso.",
     createCase: "Crear un caso",
     noCases: "Todavía no hay casos disponibles.",
+    linkedAsset: "Activo azul vinculado",
+    observedAsset: "Texto original del activo",
+    noLinkedAsset: "Sin activo vinculado",
+    saveAssetLink: "Guardar vínculo de activo",
+    assetLinked: "Se guardó el vínculo del activo del evento.",
+    assetLinkFailed: "No se pudo actualizar el vínculo del activo.",
+    assetsUnavailable: "No se pudieron cargar los activos azules.",
+    archivedAsset: "archivado",
+    manageAssets: "Gestionar activos",
+    searchAssets: "Buscar activos azules para vincular",
   },
 } as const;
 
@@ -141,8 +183,57 @@ export default function BlueEventsPage() {
   const [caseLookupError, setCaseLookupError] = React.useState("");
   const [movingEventID, setMovingEventID] = React.useState<number | null>(null);
   const [moveError, setMoveError] = React.useState("");
+  const [assets, setAssets] = React.useState<BlueAsset[]>([]);
+  const [assetByID, setAssetByID] = React.useState<Record<number, BlueAsset>>({});
+  const [assetsLoading, setAssetsLoading] = React.useState(true);
+  const [assetsError, setAssetsError] = React.useState("");
+  const [assetSearch, setAssetSearch] = React.useState("");
+  const [assetQuery, setAssetQuery] = React.useState("");
+  const [assetDrafts, setAssetDrafts] = React.useState<Record<number, string>>({});
+  const [assigningAssetID, setAssigningAssetID] = React.useState<number | null>(null);
+  const [assetLinkError, setAssetLinkError] = React.useState<{ eventID: number; message: string } | null>(null);
   const fileInput = React.useRef<HTMLInputElement>(null);
   const loadVersion = React.useRef(0);
+  const requestedAssetIDs = React.useRef(new Set<number>());
+
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => setAssetQuery(assetSearch.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [assetSearch]);
+
+  const loadAssets = React.useCallback(async () => {
+    setAssetsLoading(true);
+    setAssetsError("");
+    try {
+      const result = await blueAssetsApi.list({ q: assetQuery, status: "active", limit: 100 });
+      setAssets(result);
+      setAssetByID((current) =>
+        Object.assign({}, current, Object.fromEntries(result.map((asset) => [asset.id, asset]))),
+      );
+    } catch (cause) {
+      setAssetsError(`${labels.assetsUnavailable} ${cause instanceof Error ? cause.message : ""}`);
+    } finally {
+      setAssetsLoading(false);
+    }
+  }, [assetQuery, labels.assetsUnavailable]);
+
+  React.useEffect(() => {
+    void loadAssets();
+  }, [loadAssets]);
+
+  React.useEffect(() => {
+    const missing = Array.from(new Set(events.map((event) => (event as BlueAssetEvent).asset_id)))
+      .filter((id): id is number => typeof id === "number" && id > 0)
+      .filter((id) => !assetByID[id] && !requestedAssetIDs.current.has(id))
+      .slice(0, 8);
+    if (missing.length === 0) return;
+    for (const id of missing) requestedAssetIDs.current.add(id);
+    void Promise.allSettled(missing.map((id) => blueAssetsApi.get(id))).then((results) => {
+      const fetched: Record<number, BlueAsset> = {};
+      for (const result of results) if (result.status === "fulfilled") fetched[result.value.id] = result.value;
+      setAssetByID((current) => ({ ...current, ...fetched }));
+    });
+  }, [assetByID, events]);
 
   React.useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -157,6 +248,7 @@ export default function BlueEventsPage() {
     setLoading(true);
     setLoadingMore(false);
     setEvents([]);
+    setAssetDrafts({});
     setHasMore(false);
     setNextOffset(0);
     setError("");
@@ -376,6 +468,36 @@ export default function BlueEventsPage() {
     [labels.caseLinked, labels.caseMoveConflict, labels.caseMoveFailed, movingEventID, targetCase, targetCaseID],
   );
 
+  const assignAsset = React.useCallback(
+    async (event: BlueEvent) => {
+      if (assigningAssetID !== null) return;
+      const currentID = (event as BlueAssetEvent).asset_id ?? null;
+      const draft = assetDrafts[event.id] ?? (currentID === null ? "" : String(currentID));
+      const nextID = draft === "" ? null : Number(draft);
+      if (nextID === currentID || (nextID !== null && (!Number.isSafeInteger(nextID) || nextID <= 0))) return;
+      setAssigningAssetID(event.id);
+      setAssetLinkError(null);
+      try {
+        const updated = await blueAssetsApi.assignEventAsset(event.id, nextID);
+        setEvents((current) => current.map((entry) => (entry.id === event.id ? updated : entry)));
+        setAssetDrafts((current) => {
+          const next = { ...current };
+          delete next[event.id];
+          return next;
+        });
+        toast.success(labels.assetLinked);
+      } catch (cause) {
+        setAssetLinkError({
+          eventID: event.id,
+          message: `${labels.assetLinkFailed} ${cause instanceof Error ? cause.message : ""}`,
+        });
+      } finally {
+        setAssigningAssetID(null);
+      }
+    },
+    [assetDrafts, assigningAssetID, labels.assetLinkFailed, labels.assetLinked],
+  );
+
   return (
     <div className="space-y-5">
       <BluePageHeader
@@ -481,7 +603,31 @@ export default function BlueEventsPage() {
         </CardContent>
       </Card>
 
+      <BlueSourcesPanel onEventsChanged={() => void load()} />
+
+      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+        <Link href="/blue/assets" className="text-primary underline-offset-4 hover:underline">
+          {labels.manageAssets}
+        </Link>
+        {assetsLoading && <span>{copy.loading}</span>}
+        {assetsError && (
+          <span role="alert" className="text-destructive">
+            {assetsError}{" "}
+            <button type="button" className="underline" onClick={() => void loadAssets()}>
+              {copy.refresh}
+            </button>
+          </span>
+        )}
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
+        <Input
+          value={assetSearch}
+          onChange={(event) => setAssetSearch(event.target.value)}
+          aria-label={labels.searchAssets}
+          placeholder={labels.searchAssets}
+          className="max-w-56"
+        />
         <Input
           value={textFilter}
           onChange={(event) => setTextFilter(event.target.value)}
@@ -550,7 +696,81 @@ export default function BlueEventsPage() {
                     <TableCell>
                       <BlueSeverityBadge severity={event.severity} locale={locale} />
                     </TableCell>
-                    <TableCell className="max-w-36 truncate">{event.asset || copy.unavailable}</TableCell>
+                    <TableCell className="min-w-52 align-top">
+                      <div className="space-y-2">
+                        <div className="max-w-52 break-words text-xs">
+                          <span className="text-muted-foreground">{labels.observedAsset}: </span>
+                          {event.asset || copy.unavailable}
+                        </div>
+                        <label htmlFor={`blue-event-asset-${event.id}`} className="block text-muted-foreground text-xs">
+                          {labels.linkedAsset}
+                        </label>
+                        {(event as BlueAssetEvent).asset_id && (
+                          <p className="break-words text-xs">
+                            {assetByID[(event as BlueAssetEvent).asset_id as number]?.label ||
+                              assetByID[(event as BlueAssetEvent).asset_id as number]?.identifier ||
+                              `#${(event as BlueAssetEvent).asset_id}`}
+                          </p>
+                        )}
+                        <select
+                          id={`blue-event-asset-${event.id}`}
+                          aria-label={`${labels.linkedAsset} #${event.id}`}
+                          value={
+                            assetDrafts[event.id] ??
+                            ((event as BlueAssetEvent).asset_id ? String((event as BlueAssetEvent).asset_id) : "")
+                          }
+                          onChange={(selection) =>
+                            setAssetDrafts((current) => ({ ...current, [event.id]: selection.target.value }))
+                          }
+                          disabled={assetsLoading || Boolean(assetsError) || assigningAssetID !== null}
+                          className="h-8 w-full rounded-lg border border-input bg-background px-2 text-xs"
+                        >
+                          <option value="">{labels.noLinkedAsset}</option>
+                          {assetDrafts[event.id] &&
+                            Number(assetDrafts[event.id]) !== (event as BlueAssetEvent).asset_id &&
+                            !assets.some((asset) => asset.id === Number(assetDrafts[event.id])) && (
+                              <option value={assetDrafts[event.id]}>
+                                {assetByID[Number(assetDrafts[event.id])]?.label ||
+                                  assetByID[Number(assetDrafts[event.id])]?.identifier ||
+                                  `#${assetDrafts[event.id]}`}
+                              </option>
+                            )}
+                          {(event as BlueAssetEvent).asset_id &&
+                            !assets.some((asset) => asset.id === (event as BlueAssetEvent).asset_id) && (
+                              <option value={(event as BlueAssetEvent).asset_id ?? ""}>
+                                {assetByID[(event as BlueAssetEvent).asset_id as number]?.label ||
+                                  assetByID[(event as BlueAssetEvent).asset_id as number]?.identifier ||
+                                  `#${(event as BlueAssetEvent).asset_id}`}
+                                {assetByID[(event as BlueAssetEvent).asset_id as number]?.status === "archived"
+                                  ? ` · ${labels.archivedAsset}`
+                                  : ""}
+                              </option>
+                            )}
+                          {assets.map((asset) => (
+                            <option key={asset.id} value={asset.id}>
+                              {asset.label || asset.identifier} ({asset.kind}: {asset.identifier})
+                            </option>
+                          ))}
+                        </select>
+                        {assetDrafts[event.id] !== undefined &&
+                          assetDrafts[event.id] !==
+                            ((event as BlueAssetEvent).asset_id ? String((event as BlueAssetEvent).asset_id) : "") && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void assignAsset(event)}
+                              disabled={assigningAssetID !== null}
+                            >
+                              {assigningAssetID === event.id ? copy.loading : labels.saveAssetLink}
+                            </Button>
+                          )}
+                        {assetLinkError?.eventID === event.id && (
+                          <p role="alert" className="text-destructive text-xs">
+                            {assetLinkError.message}
+                          </p>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="min-w-72 max-w-xl whitespace-normal">
                       <div className="space-y-1">
                         <p className="break-words">{event.message}</p>

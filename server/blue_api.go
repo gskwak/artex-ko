@@ -29,6 +29,8 @@ const (
 // exploration API. The Server's normal JWT middleware protects all these paths.
 func (s *Server) registerBlueRoutes(mux *http.ServeMux) {
 	s.registerBlueChatRoutes(mux)
+	s.registerBlueSourceRoutes(mux)
+	s.registerBlueAssetRoutes(mux)
 	mux.HandleFunc("GET /api/blue/overview", s.blueOverview)
 	mux.HandleFunc("GET /api/blue/tasks", s.blueListTasks)
 	mux.HandleFunc("POST /api/blue/tasks", s.blueCreateTask)
@@ -546,6 +548,12 @@ func (s *Server) blueImportEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if ev.AssetID != nil {
+			if *ev.AssetID <= 0 {
+				writeErr(w, http.StatusBadRequest, fmt.Sprintf("events[%d] has invalid asset_id", i))
+				return
+			}
+		}
 		if len(ev.Raw) == 0 || bytes.Equal(bytes.TrimSpace(ev.Raw), []byte("null")) {
 			ev.Raw = json.RawMessage(`{}`)
 		}
@@ -556,6 +564,9 @@ func (s *Server) blueImportEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := pg.ImportBlueEvents(r.Context(), events)
 	if err != nil {
+		if blueAssetUnavailable(w, err) {
+			return
+		}
 		blueInternal(w, err)
 		return
 	}
@@ -1371,6 +1382,7 @@ func (s *Server) blueCreateAction(w http.ResponseWriter, r *http.Request) {
 		Target    string          `json:"target"`
 		Rationale string          `json:"rationale"`
 		Params    json.RawMessage `json:"params"`
+		AssetID   *int64          `json:"asset_id"`
 	}
 	if !decodeBlueJSON(w, r, &req) {
 		return
@@ -1387,11 +1399,38 @@ func (s *Server) blueCreateAction(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid action params")
 		return
 	}
+	if req.AssetID != nil {
+		if *req.AssetID <= 0 {
+			writeErr(w, http.StatusBadRequest, "asset_id must be positive")
+			return
+		}
+		asset, err := pg.GetBlueAsset(r.Context(), *req.AssetID)
+		if err != nil {
+			blueInternal(w, err)
+			return
+		}
+		if asset == nil || asset.Status != "active" {
+			writeErr(w, http.StatusConflict, "asset_id is missing or archived")
+			return
+		}
+		linked, err := pg.BlueCaseHasAsset(r.Context(), id, *req.AssetID)
+		if err != nil {
+			blueInternal(w, err)
+			return
+		}
+		if !linked {
+			writeErr(w, http.StatusConflict, "asset_id is not linked to this case")
+			return
+		}
+	}
 	item, err := pg.CreateBlueAction(r.Context(), db.BlueAction{
 		CaseID: id, Kind: req.Kind, Target: req.Target, Rationale: req.Rationale,
-		Params: req.Params, Status: "pending", RequestedBy: "admin",
+		Params: req.Params, AssetID: req.AssetID, Status: "pending", RequestedBy: "admin",
 	})
 	if err != nil {
+		if blueAssetUnavailable(w, err) {
+			return
+		}
 		blueInternal(w, err)
 		return
 	}

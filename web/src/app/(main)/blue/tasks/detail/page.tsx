@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useActiveLocale } from "@/i18n/locale-store";
 import { ApiError } from "@/lib/api";
 import { type BlueCase, blueApi } from "@/lib/blue-api";
+import { parseBlueEvidenceIDs } from "@/lib/blue-evidence-ids";
 import { blueReportButtonCopy, downloadBlueTaskReport } from "@/lib/blue-report";
 import {
   type BlueTask,
@@ -59,6 +60,8 @@ function BlueTaskDetailInner() {
   const [priority, setPriority] = React.useState<BlueTaskPriority>("medium");
   const [status, setStatus] = React.useState<BlueTaskStatus>("open");
   const [result, setResult] = React.useState("");
+  const [eventIDsText, setEventIDsText] = React.useState("");
+  const [alertIDsText, setAlertIDsText] = React.useState("");
   const [tab, setTab] = React.useState("overview");
 
   const syncTask = React.useCallback((value: BlueTask) => {
@@ -144,10 +147,17 @@ function BlueTaskDetailInner() {
 
   async function runAnalysis() {
     if (!task || !caseID || analysisInProgress || stopping) return;
+    const eventIDs = parseBlueEvidenceIDs(eventIDsText);
+    const alertIDs = parseBlueEvidenceIDs(alertIDsText);
+    if (eventIDs === null || alertIDs === null) {
+      toast.error(copy.invalidEvidenceIDs);
+      setTab("analysis");
+      return;
+    }
     setRunning(true);
     try {
       await blueTaskApi.update(task.id, formBody());
-      const response = await blueTaskApi.run(task.id);
+      const response = await blueTaskApi.run(task.id, { event_ids: eventIDs, alert_ids: alertIDs });
       syncTask(response.task);
       toast.success(copy.runQueued);
     } catch (cause) {
@@ -331,8 +341,11 @@ function BlueTaskDetailInner() {
                         value={caseID}
                         onChange={(event) => {
                           const value = event.target.value;
-                          if (!value || (/^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value))))
+                          if (!value || (/^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value)))) {
                             setCaseID(value);
+                            setEventIDsText("");
+                            setAlertIDsText("");
+                          }
                         }}
                         placeholder={copy.noCase}
                         disabled={analysisInProgress}
@@ -418,6 +431,34 @@ function BlueTaskDetailInner() {
               <p className="text-muted-foreground">{copy.analystScope}</p>
               {analysisInProgress && <p role="status">{copy.analysisInProgress}</p>}
               {!caseID && <p className="text-muted-foreground text-xs">{copy.runNeedsCase}</p>}
+              <div className="space-y-3 rounded-md border p-3">
+                <p className="font-medium">{copy.evidenceSelection}</p>
+                <p className="text-muted-foreground text-xs">{copy.evidenceSelectionHint}</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="blue-task-evidence-events">{copy.eventIDs}</Label>
+                    <Input
+                      id="blue-task-evidence-events"
+                      inputMode="numeric"
+                      value={eventIDsText}
+                      onChange={(event) => setEventIDsText(event.target.value)}
+                      placeholder={copy.evidenceIDsPlaceholder}
+                      disabled={!caseID || analysisInProgress || running || stopping}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="blue-task-evidence-alerts">{copy.alertIDs}</Label>
+                    <Input
+                      id="blue-task-evidence-alerts"
+                      inputMode="numeric"
+                      value={alertIDsText}
+                      onChange={(event) => setAlertIDsText(event.target.value)}
+                      placeholder={copy.evidenceIDsPlaceholder}
+                      disabled={!caseID || analysisInProgress || running || stopping}
+                    />
+                  </div>
+                </div>
+              </div>
               {task.completed_at && (
                 <p className="text-muted-foreground text-xs">
                   {copy.completedAt}: {blueDate(task.completed_at, locale)}

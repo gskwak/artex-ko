@@ -21,6 +21,44 @@ const (
 	blueAnalysisDBTime  = 10 * time.Second
 )
 
+var (
+	errSelectedBlueEvidenceUnavailable = errors.New("selected evidence is unavailable in this case")
+	errSelectedBlueEvidenceTooLarge    = errors.New("selected evidence exceeds the analysis input budget")
+)
+
+type blueEvidenceSelection struct {
+	EventIDs []int64 `json:"event_ids"`
+	AlertIDs []int64 `json:"alert_ids"`
+}
+
+func readBlueEvidenceSelection(w http.ResponseWriter, r *http.Request) (blueEvidenceSelection, bool) {
+	var selection blueEvidenceSelection
+	if r.Body != nil && r.ContentLength != 0 {
+		if !decodeBlueJSON(w, r, &selection) {
+			return selection, false
+		}
+	}
+	validIDs := func(ids []int64, max int) bool {
+		if len(ids) > max {
+			return false
+		}
+		seen := make(map[int64]bool, len(ids))
+		for _, id := range ids {
+			if id <= 0 || seen[id] {
+				return false
+			}
+			seen[id] = true
+		}
+		return true
+	}
+	if !validIDs(selection.EventIDs, analysis.MaxSelectedEvents) ||
+		!validIDs(selection.AlertIDs, analysis.MaxSelectedAlerts) {
+		writeErr(w, http.StatusBadRequest, "select up to 12 unique positive event and alert IDs each")
+		return selection, false
+	}
+	return selection, true
+}
+
 // A case analysis is a bounded background job. This cap protects shared LLM
 // profiles from unbounded manual starts; a new request receives 429 when full.
 var blueAnalysisSlots = make(chan struct{}, 2)
@@ -34,7 +72,11 @@ func (s *Server) blueAnalyzeCase(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	job, status, message := s.prepareBlueCaseAnalysis(r.Context(), pg, caseID)
+	selection, ok := readBlueEvidenceSelection(w, r)
+	if !ok {
+		return
+	}
+	job, status, message := s.prepareBlueCaseAnalysis(r.Context(), pg, caseID, selection, nil)
 	if job == nil {
 		writeErr(w, status, message)
 		return
@@ -89,7 +131,7 @@ func (s *Server) cancelBlueAnalysis(id int64) {
 	}
 }
 
-func (s *Server) prepareBlueCaseAnalysis(ctx context.Context, pg *db.DB, caseID int64) (*bluePreparedAnalysis, int, string) {
+func (s *Server) prepareBlueCaseAnalysis(ctx context.Context, pg *db.DB, caseID int64, selection blueEvidenceSelection, task *analysis.Task) (*bluePreparedAnalysis, int, string) {
 	internal := func(err error) (*bluePreparedAnalysis, int, string) {
 		log.Printf("[blue] prepare analysis: %v", err)
 		return nil, http.StatusInternalServerError, "blue-team request failed"
@@ -119,9 +161,16 @@ func (s *Server) prepareBlueCaseAnalysis(ctx context.Context, pg *db.DB, caseID 
 	if !ready {
 		return nil, http.StatusServiceUnavailable, "configure a model for the blue analyst"
 	}
-	input, err := blueAnalysisInput(ctx, pg, caseItem)
+	input, err := blueAnalysisInput(ctx, pg, caseItem, selection)
 	if err != nil {
+		if errors.Is(err, errSelectedBlueEvidenceUnavailable) {
+			return nil, http.StatusBadRequest, errSelectedBlueEvidenceUnavailable.Error()
+		}
 		return internal(err)
+	}
+	input.Task = task
+	if !analysis.FitsSelectedEvidence(input) {
+		return nil, http.StatusBadRequest, errSelectedBlueEvidenceTooLarge.Error()
 	}
 	if len(input.Events)+len(input.Alerts) == 0 {
 		return nil, http.StatusConflict, "add case events or alerts before analysis"
@@ -131,7 +180,8 @@ func (s *Server) prepareBlueCaseAnalysis(ctx context.Context, pg *db.DB, caseID 
 	default:
 		return nil, http.StatusTooManyRequests, "blue analysis capacity is busy; retry shortly"
 	}
-	run, err := pg.CreateBlueAnalysisRun(ctx, caseID, profileID)
+	run, err := pg.CreateBlueAnalysisRunWithSelection(ctx, caseID, profileID,
+		selection.EventIDs, selection.AlertIDs)
 	if err != nil {
 		<-blueAnalysisSlots
 		if errors.Is(err, db.ErrBlueConflict) {
@@ -165,7 +215,7 @@ func (s *Server) blueAnalystProvider(actor *db.Agent) (llm.Provider, intConfig, 
 // into the background job; it only needs the output token budget.
 type intConfig struct{ MaxTokens int }
 
-func blueAnalysisInput(ctx context.Context, pg *db.DB, item *db.BlueCase) (analysis.Input, error) {
+func blueAnalysisInput(ctx context.Context, pg *db.DB, item *db.BlueCase, selection blueEvidenceSelection) (analysis.Input, error) {
 	id := item.ID
 	events, err := pg.ListBlueEvents(ctx, &id, "", analysis.MaxEvents+1, 0)
 	if err != nil {
@@ -177,24 +227,56 @@ func blueAnalysisInput(ctx context.Context, pg *db.DB, item *db.BlueCase) (analy
 	}
 	in := analysis.Input{CaseID: id, Title: item.Title, Description: item.Description,
 		Status: item.Status, Severity: item.Severity,
-		EventsTruncated: len(events) > analysis.MaxEvents, AlertsTruncated: len(alerts) > analysis.MaxAlerts,
-		Events: make([]analysis.Event, 0, min(len(events), analysis.MaxEvents)),
-		Alerts: make([]analysis.Alert, 0, min(len(alerts), analysis.MaxAlerts))}
-	if len(events) > analysis.MaxEvents {
-		events = events[:analysis.MaxEvents]
-	}
-	if len(alerts) > analysis.MaxAlerts {
-		alerts = alerts[:analysis.MaxAlerts]
-	}
-	for _, e := range events {
+		SelectedEventIDs: append([]int64(nil), selection.EventIDs...),
+		SelectedAlertIDs: append([]int64(nil), selection.AlertIDs...),
+		EventsTruncated:  len(events) > analysis.MaxEvents, AlertsTruncated: len(alerts) > analysis.MaxAlerts,
+		Events: make([]analysis.Event, 0, analysis.MaxEvents),
+		Alerts: make([]analysis.Alert, 0, analysis.MaxAlerts)}
+	seenEvents := make(map[int64]bool, analysis.MaxEvents)
+	appendEvent := func(e db.BlueEvent) {
+		if seenEvents[e.ID] || len(in.Events) >= analysis.MaxEvents {
+			return
+		}
+		seenEvents[e.ID] = true
 		in.Events = append(in.Events, analysis.Event{ID: e.ID, Source: e.Source,
 			EventType: e.EventType, Severity: e.Severity, Asset: e.Asset,
 			Message: e.Message, OccurredAt: e.OccurredAt, Raw: e.Raw})
 	}
-	for _, a := range alerts {
+	for _, eventID := range selection.EventIDs {
+		e, getErr := pg.GetBlueEvent(ctx, eventID)
+		if getErr != nil {
+			return analysis.Input{}, getErr
+		}
+		if e == nil || e.CaseID == nil || *e.CaseID != id {
+			return analysis.Input{}, errSelectedBlueEvidenceUnavailable
+		}
+		appendEvent(*e)
+	}
+	for _, e := range events {
+		appendEvent(e)
+	}
+	seenAlerts := make(map[int64]bool, analysis.MaxAlerts)
+	appendAlert := func(a db.BlueAlert) {
+		if seenAlerts[a.ID] || len(in.Alerts) >= analysis.MaxAlerts {
+			return
+		}
+		seenAlerts[a.ID] = true
 		in.Alerts = append(in.Alerts, analysis.Alert{ID: a.ID, RuleID: a.RuleID,
 			EventID: a.EventID, Title: a.Title, Severity: a.Severity,
 			Status: a.Status, Reason: a.Reason})
+	}
+	for _, alertID := range selection.AlertIDs {
+		a, getErr := pg.GetBlueAlert(ctx, alertID)
+		if getErr != nil {
+			return analysis.Input{}, getErr
+		}
+		if a == nil || a.CaseID == nil || *a.CaseID != id {
+			return analysis.Input{}, errSelectedBlueEvidenceUnavailable
+		}
+		appendAlert(*a)
+	}
+	for _, a := range alerts {
+		appendAlert(a)
 	}
 	return in, nil
 }
