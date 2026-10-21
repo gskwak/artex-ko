@@ -4,6 +4,7 @@ import { useActiveLocale } from "@/i18n/locale-store";
 
 const en = {
   title: "Blue team chat",
+  analyst: "Blue analyst",
   description: "Discuss security evidence and response decisions with the blue analyst.",
   scope:
     "The blue analyst uses only the context you provide here. To analyze stored case evidence, open a case. It does not execute target-side tools.",
@@ -45,6 +46,7 @@ type Copy = Record<keyof typeof en, string>;
 
 const ko: Copy = {
   title: "블루팀 대화",
+  analyst: "블루팀 분석 에이전트",
   description: "블루팀 분석 에이전트와 보안 증거와 대응 판단을 논의합니다.",
   scope:
     "블루팀 분석 에이전트는 이 대화에 제공한 내용만 사용합니다. 저장된 사건 증거 분석은 사건 화면에서 실행하세요. 대상 시스템에서 도구를 실행하지 않습니다.",
@@ -84,6 +86,7 @@ const ko: Copy = {
 
 const zh: Copy = {
   title: "蓝队对话",
+  analyst: "蓝队分析员",
   description: "与蓝队分析员讨论安全证据和响应决策。",
   scope: "蓝队分析员仅使用此对话中提供的内容。请在案件页面分析已存储的证据。它不会在目标系统执行工具。",
   configureModel: "如果无法开始对话，请检查系统 → LLM 中的模型设置。",
@@ -122,6 +125,7 @@ const zh: Copy = {
 
 const es: Copy = {
   title: "Chat del equipo azul",
+  analyst: "Analista del equipo azul",
   description: "Analiza evidencias de seguridad y decisiones de respuesta con el analista azul.",
   scope:
     "El analista azul solo usa el contexto proporcionado aquí. Para analizar pruebas guardadas, abre un caso. No ejecuta herramientas en los objetivos.",

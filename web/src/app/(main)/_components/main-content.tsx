@@ -18,7 +18,7 @@ import { SearchDialog } from "./sidebar/search-dialog";
 import { ThemeSwitcher } from "./sidebar/theme-switcher";
 import { UpdateBadge } from "./update-badge";
 
-// Keep the task detail page as is: it has its own header, tabs, and padding, so skip the global ones.
+// Task detail pages have their own header, tabs, and padding, so skip the global ones.
 function isFullBleed(pathname: string) {
   const p = (() => {
     try {
@@ -31,7 +31,11 @@ function isFullBleed(pathname: string) {
   // Strip the trailing slash before checking the prefix, or the list page is mistaken for
   // a detail page and loses the global header.
   const normalized = p.replace(/\/+$/, "");
-  return normalized.startsWith("/redteam/tasks/") || normalized.startsWith("/function/tasks/");
+  return (
+    normalized.startsWith("/redteam/tasks/") ||
+    normalized.startsWith("/blue/tasks/") ||
+    normalized.startsWith("/function/tasks/")
+  );
 }
 
 export function MainContent({ children }: { children: ReactNode }) {

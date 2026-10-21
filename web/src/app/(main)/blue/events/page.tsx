@@ -17,6 +17,7 @@ import { type BlueCase, type BlueEvent, type BlueImportResult, type BlueSeverity
 import { blueSeverityLabel, useBlueCopy } from "@/lib/blue-copy";
 
 import { BlueEmpty, BlueError, BlueLoading, BluePageHeader, BlueSeverityBadge, blueDate } from "../_components/blue-ui";
+import { BlueInvestigationTabs } from "../_components/investigation-tabs";
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const PAGE_SIZE = 100;
@@ -319,6 +320,8 @@ export default function BlueEventsPage() {
           </Button>
         }
       />
+
+      <BlueInvestigationTabs active="events" />
 
       <Card>
         <CardHeader className="pb-2">

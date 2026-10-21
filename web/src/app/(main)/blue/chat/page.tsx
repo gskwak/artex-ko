@@ -2,22 +2,24 @@
 
 import * as React from "react";
 
-import Link from "next/link";
-
 import {
-  ArrowLeft,
   ArrowUp,
   Bot,
+  ChevronDown,
+  ChevronRight,
+  ListChecks,
+  Loader2,
   MoreHorizontal,
+  Pencil,
   Pin,
   PinOff,
   Plus,
-  RefreshCw,
   Search,
-  ShieldCheck,
   Square,
   Trash2,
+  Zap,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { Transcript } from "@/components/transcript";
@@ -31,9 +33,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,8 +44,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { useActiveLocale } from "@/i18n/locale-store";
 import { mergeActivities } from "@/lib/activity-merge";
@@ -54,9 +57,10 @@ import { shouldSubmitOnKey, useChatSendMode } from "@/lib/chat-send-mode";
 import type { Activity, Conversation, LLMProfile } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-import { BlueError, BluePageHeader } from "../_components/blue-ui";
+import { BlueError } from "../_components/blue-ui";
 
 const HISTORY_PAGE = 200;
+const CONVERSATION_LIST_PAGE = 100;
 
 function pinned(conversation: Conversation): boolean {
   return conversation.pinned ?? Boolean(conversation.pinned_at);
@@ -74,30 +78,70 @@ function ModelPicker({
   disabled?: boolean;
 }) {
   const copy = useBlueChatCopy();
+  const t = useTranslations("chat");
+  const [open, setOpen] = React.useState(false);
   const defaultProfile = profiles.find((profile) => profile.is_default);
+  const currentProfile = selected == null ? null : profiles.find((profile) => Number(profile.id) === selected);
+  const defaultLabel = defaultProfile ? t("llmProfile.defaultNamed", { name: defaultProfile.name }) : copy.defaultModel;
+  const label = currentProfile?.name ?? defaultLabel;
   return (
-    <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-      <span className="shrink-0">{copy.model}</span>
-      <Select
-        value={selected == null ? "default" : String(selected)}
-        onValueChange={(value) => onChange(value === "default" ? null : Number(value))}
-        disabled={disabled}
-      >
-        <SelectTrigger size="sm" className="h-8 min-w-0 max-w-56 text-xs">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="default">
-            {copy.defaultModel}
-            {defaultProfile ? ` · ${defaultProfile.name}` : ""}
-          </SelectItem>
+    <div className="flex min-w-0 shrink-0 items-center gap-1 px-1 pt-0.5 pb-1">
+      <Zap className="size-3 shrink-0 text-muted-foreground/50" />
+      <span className="truncate text-xs text-muted-foreground/70" title={label}>
+        {label}
+      </span>
+      <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            disabled={disabled}
+            className="flex shrink-0 items-center gap-0.5 text-xs text-primary hover:underline disabled:pointer-events-none disabled:opacity-40"
+          >
+            {t("llmProfile.change")}
+            <ChevronDown className="size-3" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-64 p-1">
+          <p className="px-2 py-1 text-[11px] font-medium text-muted-foreground">{t("llmProfile.select")}</p>
+          <button
+            type="button"
+            onClick={() => {
+              onChange(null);
+              setOpen(false);
+            }}
+            className={cn(
+              "flex w-full flex-col rounded px-2 py-1.5 text-left hover:bg-accent",
+              selected == null && "bg-accent",
+            )}
+          >
+            <span className="text-sm">{defaultLabel}</span>
+            {defaultProfile && (
+              <span className="text-[11px] text-muted-foreground">
+                {defaultProfile.format} · {defaultProfile.model}
+              </span>
+            )}
+          </button>
           {profiles.map((profile) => (
-            <SelectItem key={profile.id} value={String(profile.id)}>
-              {profile.name} · {profile.model}
-            </SelectItem>
+            <button
+              key={profile.id}
+              type="button"
+              onClick={() => {
+                onChange(Number(profile.id));
+                setOpen(false);
+              }}
+              className={cn(
+                "flex w-full flex-col rounded px-2 py-1.5 text-left hover:bg-accent",
+                selected === Number(profile.id) && "bg-accent",
+              )}
+            >
+              <span className="text-sm">{profile.name}</span>
+              <span className="text-[11px] text-muted-foreground">
+                {profile.format} · {profile.model}
+              </span>
+            </button>
           ))}
-        </SelectContent>
-      </Select>
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
@@ -110,6 +154,7 @@ function Composer({
   busy,
   running,
   disabled,
+  leftSlot,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -118,6 +163,7 @@ function Composer({
   busy: boolean;
   running: boolean;
   disabled?: boolean;
+  leftSlot?: React.ReactNode;
 }) {
   const copy = useBlueChatCopy();
   const sendMode = useChatSendMode();
@@ -127,40 +173,43 @@ function Composer({
     if (!busy && !running && !disabled && value.trim()) onSend();
   };
   return (
-    <div className="flex items-end gap-2 border-t bg-background p-3">
-      <Textarea
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        onKeyDown={onKeyDown}
-        placeholder={copy.placeholder}
-        aria-label={copy.placeholder}
-        className="max-h-40 min-h-10 flex-1 resize-none"
-        rows={2}
-        maxLength={16000}
-        disabled={busy || running || disabled}
-      />
-      {running ? (
-        <Button
-          size="icon"
-          variant="destructive"
-          onClick={onStop}
-          disabled={busy}
-          aria-label={copy.stop}
-          title={copy.stop}
-        >
-          <Square className="size-3.5 fill-current" />
-        </Button>
-      ) : (
-        <Button
-          size="icon"
-          onClick={onSend}
-          disabled={busy || Boolean(disabled) || !value.trim()}
-          aria-label={copy.send}
-          title={copy.send}
-        >
-          <ArrowUp className="size-4" />
-        </Button>
-      )}
+    <div className="border-t p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {leftSlot && <div className="w-full sm:w-auto">{leftSlot}</div>}
+        <Textarea
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={copy.placeholder}
+          aria-label={copy.placeholder}
+          className="max-h-40 min-h-10 min-w-0 flex-1 resize-none"
+          rows={1}
+          maxLength={16000}
+          disabled={busy || running || disabled}
+        />
+        {running ? (
+          <Button
+            size="icon"
+            variant="destructive"
+            onClick={onStop}
+            disabled={busy}
+            aria-label={copy.stop}
+            title={copy.stop}
+          >
+            <Square className="size-3.5 fill-current" />
+          </Button>
+        ) : (
+          <Button
+            size="icon"
+            onClick={onSend}
+            disabled={busy || Boolean(disabled) || !value.trim()}
+            aria-label={copy.send}
+            title={copy.send}
+          >
+            <ArrowUp className="size-4" />
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -169,14 +218,13 @@ function ConversationView({
   conversation,
   profiles,
   onUpdated,
-  onBack,
 }: {
   conversation: Conversation;
   profiles: LLMProfile[];
   onUpdated: () => void;
-  onBack: () => void;
 }) {
   const copy = useBlueChatCopy();
+  const t = useTranslations("chat");
   const [messages, setMessages] = React.useState<Activity[]>([]);
   const [loaded, setLoaded] = React.useState(false);
   const [loadError, setLoadError] = React.useState("");
@@ -352,47 +400,42 @@ function ConversationView({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
-        <Button size="icon" variant="ghost" className="md:hidden" onClick={onBack} aria-label={copy.conversations}>
-          <ArrowLeft className="size-4" />
-        </Button>
-        <Bot className="size-4 shrink-0 text-primary" />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">
-          {conversation.title || copy.newConversation}
+      <div className="flex min-w-0 flex-wrap items-center gap-2 border-b px-4 py-2.5">
+        <Bot className="size-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 max-w-48 truncate text-sm font-medium">{copy.analyst}</span>
+        <span className="hidden shrink-0 font-mono text-xs text-muted-foreground sm:inline">
+          {conversation.agent_key}
         </span>
+        <span className="min-w-0 truncate text-xs text-muted-foreground">{copy.description}</span>
         {running && (
-          <span className="text-xs text-primary" role="status">
-            {copy.running}
+          <span
+            className="inline-flex items-center gap-1 rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400"
+            role="status"
+          >
+            <span className="size-1 animate-pulse rounded-full bg-blue-500" />
+            {t("live")}
           </span>
         )}
       </div>
-      <ScrollArea className="min-h-0 flex-1">
-        <div ref={contentRef} className="mx-auto max-w-4xl space-y-3 px-4 py-5">
+      <ScrollArea type="auto" className="min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!">
+        <div ref={contentRef} className="min-w-0 max-w-full px-4 py-3">
           {loadError && (
             <BlueError message={loadError} retry={() => window.location.reload()} retryLabel={copy.refresh} />
           )}
           {!loaded && <p className="text-center text-sm text-muted-foreground">{copy.loading}</p>}
           {hasMore && (
-            <div className="text-center">
+            <div className="pb-2 text-center">
               <Button size="sm" variant="ghost" onClick={() => void loadEarlier()} disabled={loadingMore}>
                 {copy.loadEarlier}
               </Button>
             </div>
           )}
           {loaded && messages.length === 0 && !loadError && (
-            <p className="py-12 text-center text-sm text-muted-foreground">{copy.emptyHint}</p>
+            <p className="py-10 text-center text-sm text-muted-foreground">{copy.emptyHint}</p>
           )}
           <Transcript activity={messages} live={running} chat fetchDetail={fetchDetail} />
         </div>
       </ScrollArea>
-      <div className="border-t px-3 py-2">
-        <ModelPicker
-          profiles={profiles}
-          selected={conversation.llm_profile_id ?? null}
-          onChange={(id) => void changeProfile(id)}
-          disabled={profileBusy || running}
-        />
-      </div>
       <Composer
         value={input}
         onChange={setInput}
@@ -400,6 +443,12 @@ function ConversationView({
         onStop={() => void stop()}
         busy={busy}
         running={running}
+      />
+      <ModelPicker
+        profiles={profiles}
+        selected={conversation.llm_profile_id ?? null}
+        onChange={(id) => void changeProfile(id)}
+        disabled={profileBusy || running}
       />
     </div>
   );
@@ -433,32 +482,178 @@ function DraftView({
   }
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-5 text-center">
-        <div className="flex size-14 items-center justify-center rounded-full bg-primary/10">
-          <ShieldCheck className="size-7 text-primary" />
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
+        <div className="flex size-12 items-center justify-center rounded-full bg-primary/10">
+          <Bot className="size-6 text-primary" />
         </div>
-        <h2 className="text-lg font-semibold">{copy.emptyTitle}</h2>
-        <p className="max-w-md text-sm text-muted-foreground">{copy.emptyHint}</p>
+        <h2 className="text-sm font-medium">{copy.emptyTitle}</h2>
+        <p className="max-w-md text-xs text-muted-foreground">{copy.emptyHint}</p>
         <p className="max-w-lg text-xs text-muted-foreground">{copy.scope}</p>
-        <Link href="/blue/cases" className="text-sm text-primary underline-offset-4 hover:underline">
-          {copy.linkedCases}
-        </Link>
-        {profiles.length === 0 && (
-          <Link href="/system/llm" className="text-xs text-muted-foreground underline-offset-4 hover:underline">
-            {copy.configureModel}
-          </Link>
-        )}
       </div>
-      <div className="border-t px-3 py-2">
-        <ModelPicker profiles={profiles} selected={profileID} onChange={setProfileID} disabled={busy} />
-      </div>
-      <Composer value={input} onChange={setInput} onSend={() => void send()} busy={busy} running={false} />
+      <Composer
+        value={input}
+        onChange={setInput}
+        onSend={() => void send()}
+        busy={busy}
+        running={false}
+        leftSlot={
+          <div className="flex h-9 w-full items-center gap-2 rounded-md border bg-background px-3 text-sm sm:w-40">
+            <Bot className="size-3.5" />
+            <span className="truncate">{copy.analyst}</span>
+          </div>
+        }
+      />
+      <ModelPicker profiles={profiles} selected={profileID} onChange={setProfileID} disabled={busy} />
+    </div>
+  );
+}
+
+function ConversationItem({
+  conversation,
+  active,
+  dateLocale,
+  selectionMode,
+  selectedForDelete,
+  onSelect,
+  onRename,
+  onPin,
+  onDelete,
+  onSelectedForDeleteChange,
+}: {
+  conversation: Conversation;
+  active: boolean;
+  dateLocale: string;
+  selectionMode: boolean;
+  selectedForDelete: boolean;
+  onSelect: (id: number) => void;
+  onRename: (conversation: Conversation, title: string) => Promise<void>;
+  onPin: (conversation: Conversation) => void;
+  onDelete: (conversation: Conversation) => void;
+  onSelectedForDeleteChange: (id: number, checked: boolean) => void;
+}) {
+  const copy = useBlueChatCopy();
+  const t = useTranslations("chat");
+  const [renaming, setRenaming] = React.useState(false);
+  const [renameText, setRenameText] = React.useState("");
+  const cancelRenameRef = React.useRef(false);
+  const renameInputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (!renaming) return;
+    renameInputRef.current?.focus();
+    renameInputRef.current?.select();
+  }, [renaming]);
+
+  function startRename() {
+    cancelRenameRef.current = false;
+    setRenameText(conversation.title);
+    setRenaming(true);
+  }
+
+  function commitRename() {
+    if (cancelRenameRef.current) return;
+    const title = renameText.trim();
+    setRenaming(false);
+    if (title && title !== conversation.title) void onRename(conversation, title);
+  }
+
+  return (
+    <div
+      className={cn(
+        "group flex min-w-0 items-center gap-1 rounded-md pr-1 transition-colors",
+        active ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
+      )}
+    >
+      {selectionMode && (
+        <Checkbox
+          checked={selectedForDelete}
+          onCheckedChange={(checked) => onSelectedForDeleteChange(conversation.id, checked === true)}
+          aria-label={t("item.selectAria", { title: conversation.title || copy.newConversation })}
+          className="ml-1 shrink-0"
+        />
+      )}
+      {renaming ? (
+        <input
+          ref={renameInputRef}
+          aria-label={copy.renameTitle}
+          value={renameText}
+          onChange={(event) => setRenameText(event.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "Escape") {
+              event.preventDefault();
+              cancelRenameRef.current = true;
+              setRenaming(false);
+            }
+          }}
+          maxLength={240}
+          className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => onSelect(conversation.id)}
+          onDoubleClick={startRename}
+          title={t("item.renameHint")}
+          className="min-w-0 flex-1 rounded-md px-2 py-1.5 text-left"
+          aria-current={active ? "page" : undefined}
+        >
+          <div className="flex min-w-0 items-center gap-1.5">
+            {pinned(conversation) && <Pin className="size-3 shrink-0 text-primary" aria-label={t("item.pinnedAria")} />}
+            <span className="truncate text-sm">{conversation.title || copy.newConversation}</span>
+            {conversation.running && (
+              <Badge variant="secondary" className="shrink-0 gap-1" title={t("item.runningTooltip")}>
+                <Spinner className="size-3" aria-hidden="true" />
+                {t("running")}
+              </Badge>
+            )}
+          </div>
+          <div className="flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
+            <span className="shrink-0">
+              {new Date(conversation.created_at).toLocaleDateString(dateLocale, {
+                month: "numeric",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+            <span className="shrink-0 opacity-60">#{conversation.id}</span>
+          </div>
+        </button>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="shrink-0 text-muted-foreground"
+            aria-label={t("item.manageAria", { title: conversation.title || copy.newConversation })}
+          >
+            <MoreHorizontal />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={startRename}>
+            <Pencil /> {copy.rename}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => onPin(conversation)}>
+            {pinned(conversation) ? <PinOff /> : <Pin />}
+            {pinned(conversation) ? copy.unpin : copy.pin}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem variant="destructive" onSelect={() => onDelete(conversation)}>
+            <Trash2 /> {copy.delete}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
 
 export default function BlueChatPage() {
   const copy = useBlueChatCopy();
+  const t = useTranslations("chat");
   const locale = useActiveLocale();
   const [conversations, setConversations] = React.useState<Conversation[]>([]);
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
@@ -466,10 +661,14 @@ export default function BlueChatPage() {
   const [loaded, setLoaded] = React.useState(false);
   const [error, setError] = React.useState("");
   const [search, setSearch] = React.useState("");
-  const [renaming, setRenaming] = React.useState<Conversation | null>(null);
-  const [renameText, setRenameText] = React.useState("");
   const [deleting, setDeleting] = React.useState<Conversation | null>(null);
   const [actionBusy, setActionBusy] = React.useState(false);
+  const [selectionMode, setSelectionMode] = React.useState(false);
+  const [selectedConversationIds, setSelectedConversationIds] = React.useState<Set<number>>(() => new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false);
+  const [bulkDeleting, setBulkDeleting] = React.useState(false);
+  const [visibleConversationCount, setVisibleConversationCount] = React.useState(CONVERSATION_LIST_PAGE);
+  const [groupCollapsed, setGroupCollapsed] = React.useState(false);
   const requestRef = React.useRef(0);
 
   const reload = React.useCallback(async () => {
@@ -521,22 +720,90 @@ export default function BlueChatPage() {
 
   const selected = conversations.find((conversation) => conversation.id === selectedID) ?? null;
   const query = search.trim().toLocaleLowerCase();
-  const visible = conversations.filter(
+  const filtered = conversations.filter(
     (conversation) => !query || `${conversation.title} ${conversation.id}`.toLocaleLowerCase().includes(query),
   );
+  const visible = filtered.slice(0, visibleConversationCount);
+  const pinnedConversations = visible.filter(pinned);
+  const recentConversations = visible.filter((conversation) => !pinned(conversation));
+  const selectedConversationCount = filtered.filter((conversation) =>
+    selectedConversationIds.has(conversation.id),
+  ).length;
+  const allConversationsSelected = filtered.length > 0 && selectedConversationCount === filtered.length;
+  const conversationHeaderChecked: boolean | "indeterminate" = allConversationsSelected
+    ? true
+    : selectedConversationCount > 0
+      ? "indeterminate"
+      : false;
   const dateLocale = { ko: "ko-KR", zh: "zh-CN", es: "es-ES", en: "en-US" }[locale];
 
-  async function saveRename() {
-    if (!renaming || !renameText.trim()) return;
-    setActionBusy(true);
+  React.useEffect(() => {
+    const live = new Set(conversations.map((conversation) => conversation.id));
+    setSelectedConversationIds((current) => {
+      if (current.size === 0) return current;
+      const next = new Set([...current].filter((id) => live.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [conversations]);
+
+  function toggleConversationSelected(id: number, checked: boolean) {
+    setSelectedConversationIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function exitSelectionMode() {
+    setSelectionMode(false);
+    setSelectedConversationIds(new Set());
+  }
+
+  async function deleteSelectedConversations() {
+    const ids = filtered
+      .filter((conversation) => selectedConversationIds.has(conversation.id))
+      .map((conversation) => conversation.id);
+    if (ids.length === 0 || bulkDeleting) return;
+    setBulkDeleting(true);
+    const deleted = new Set<number>();
+    const failed: number[] = [];
     try {
-      await blueChatApi.updateConversation(renaming.id, { title: renameText.trim() });
-      setRenaming(null);
+      for (const id of ids) {
+        try {
+          await blueChatApi.deleteConversation(id);
+          deleted.add(id);
+        } catch {
+          failed.push(id);
+        }
+      }
+      if (selectedID != null && deleted.has(selectedID)) setSelectedID(null);
+      setSelectedConversationIds(new Set(failed));
+      if (deleted.size > 0) toast.success(t("bulkDeleted", { count: deleted.size }));
+      if (failed.length > 0)
+        toast.error(
+          t("bulkDeleteFailed", {
+            count: failed.length,
+            details: failed
+              .slice(0, 3)
+              .map((id) => `#${id}`)
+              .join(", "),
+          }),
+        );
+      else setSelectionMode(false);
+      setBulkDeleteOpen(false);
+      await reload();
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
+  async function renameConversation(conversation: Conversation, title: string) {
+    try {
+      await blueChatApi.updateConversation(conversation.id, { title });
       await reload();
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : copy.saveFailed);
-    } finally {
-      setActionBusy(false);
     }
   }
 
@@ -565,171 +832,203 @@ export default function BlueChatPage() {
   }
 
   return (
-    <div>
-      <BluePageHeader
-        title={copy.title}
-        description={copy.description}
-        actions={
-          <Button size="sm" variant="outline" onClick={() => void reload()} aria-label={copy.refresh}>
-            <RefreshCw className="size-4" />
-            {copy.refresh}
-          </Button>
-        }
-      />
+    <div
+      data-content-padding="false"
+      className="flex h-[calc(100svh-3rem)] min-w-0 flex-col overflow-hidden p-3 sm:p-4 md:h-[calc(100svh-4rem)] md:p-6"
+    >
       {error && (
         <div className="mb-3">
           <BlueError message={error} retry={() => void reload()} retryLabel={copy.refresh} />
         </div>
       )}
-      <Card className="flex h-[calc(100dvh-13rem)] min-h-[32rem] flex-col overflow-hidden p-0 md:flex-row">
-        <aside
-          className={cn(
-            "flex h-52 shrink-0 flex-col border-b md:h-auto md:w-72 md:border-b-0 md:border-r",
-            selectedID != null && "max-md:hidden",
-          )}
-        >
-          <div className="flex items-center justify-between gap-2 border-b p-3">
-            <span className="text-sm font-semibold">{copy.conversations}</span>
-            <Button size="sm" onClick={() => setSelectedID(null)}>
-              <Plus className="size-4" />
-              {copy.newConversation}
+      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-[minmax(10rem,15rem)_minmax(0,1fr)] gap-3 md:grid-cols-[18rem_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)] md:gap-4">
+        <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border bg-card">
+          <div className="flex flex-col gap-2 border-b p-2">
+            <Button size="sm" className="w-full" onClick={() => setSelectedID(null)}>
+              <Plus /> {copy.newConversation}
             </Button>
+            <div className="relative">
+              <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className="h-8 pl-8 text-xs"
+                placeholder={copy.search}
+                aria-label={copy.search}
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setVisibleConversationCount(CONVERSATION_LIST_PAGE);
+                  setSelectedConversationIds(new Set());
+                  setBulkDeleteOpen(false);
+                }}
+              />
+            </div>
+            {conversations.length > 0 &&
+              (selectionMode ? (
+                <div className="flex items-center gap-2 px-1">
+                  <Checkbox
+                    checked={conversationHeaderChecked}
+                    onCheckedChange={(checked) =>
+                      setSelectedConversationIds(
+                        checked === true ? new Set(filtered.map((conversation) => conversation.id)) : new Set(),
+                      )
+                    }
+                    aria-label={t("selectAllAria")}
+                    disabled={filtered.length === 0 || bulkDeleting}
+                  />
+                  <span className="min-w-0 flex-1 text-xs tabular-nums text-muted-foreground">
+                    {selectedConversationCount > 0
+                      ? t("selectedCount", { count: selectedConversationCount })
+                      : query
+                        ? t("filteredCount", { shown: filtered.length, total: conversations.length })
+                        : t("totalCount", { count: conversations.length })}
+                  </span>
+                  {selectedConversationCount > 0 && (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      disabled={bulkDeleting}
+                      onClick={() => setBulkDeleteOpen(true)}
+                    >
+                      <Trash2 data-icon="inline-start" /> {copy.delete}
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" onClick={exitSelectionMode}>
+                    {t("done")}
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-1">
+                  <span className="min-w-0 flex-1 text-xs tabular-nums text-muted-foreground">
+                    {query
+                      ? t("filteredCount", { shown: filtered.length, total: conversations.length })
+                      : t("totalCount", { count: conversations.length })}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-muted-foreground"
+                    onClick={() => setSelectionMode(true)}
+                    disabled={filtered.length === 0}
+                  >
+                    <ListChecks data-icon="inline-start" /> {t("multiSelect")}
+                  </Button>
+                </div>
+              ))}
           </div>
-          <div className="relative px-3 py-2">
-            <Search className="absolute left-5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="h-8 pl-8 text-xs"
-              placeholder={copy.search}
-              aria-label={copy.search}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </div>
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="space-y-0.5 px-2 pb-2">
+          <ScrollArea type="auto" className="min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!">
+            <div className="flex min-w-0 flex-col gap-0.5 p-2">
               {!loaded && <p className="px-2 py-5 text-center text-xs text-muted-foreground">{copy.loading}</p>}
               {loaded && conversations.length === 0 && (
                 <p className="px-2 py-5 text-center text-xs text-muted-foreground">{copy.noConversations}</p>
               )}
-              {loaded && conversations.length > 0 && visible.length === 0 && (
+              {loaded && conversations.length > 0 && filtered.length === 0 && (
                 <p className="px-2 py-5 text-center text-xs text-muted-foreground">{copy.noMatches}</p>
               )}
-              {visible.map((conversation) => (
-                <div
+              {pinnedConversations.map((conversation) => (
+                <ConversationItem
                   key={conversation.id}
-                  className={cn(
-                    "flex items-center rounded-md hover:bg-muted/60",
-                    selectedID === conversation.id && "bg-primary/10",
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setSelectedID(conversation.id)}
-                    className="min-w-0 flex-1 px-2 py-2 text-left"
-                    aria-current={selectedID === conversation.id ? "page" : undefined}
-                  >
-                    <span className="flex items-center gap-1.5 truncate text-sm">
-                      {pinned(conversation) && <Pin className="size-3 shrink-0 text-primary" />}
-                      {conversation.running && (
-                        <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
-                      )}
-                      <span className="truncate">{conversation.title || copy.newConversation}</span>
-                    </span>
-                    <span className="text-[11px] text-muted-foreground">
-                      {new Date(conversation.updated_at).toLocaleString(dateLocale)}
-                    </span>
-                  </button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="mr-1 size-7"
-                        aria-label={conversation.title || copy.newConversation}
-                      >
-                        <MoreHorizontal className="size-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        onClick={() => {
-                          setRenaming(conversation);
-                          setRenameText(conversation.title);
-                        }}
-                      >
-                        {copy.rename}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => void togglePin(conversation)}>
-                        {pinned(conversation) ? <PinOff className="size-4" /> : <Pin className="size-4" />}
-                        {pinned(conversation) ? copy.unpin : copy.pin}
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem variant="destructive" onClick={() => setDeleting(conversation)}>
-                        <Trash2 className="size-4" />
-                        {copy.delete}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
+                  conversation={conversation}
+                  active={selectedID === conversation.id}
+                  dateLocale={dateLocale}
+                  selectionMode={selectionMode}
+                  selectedForDelete={selectedConversationIds.has(conversation.id)}
+                  onSelect={setSelectedID}
+                  onRename={renameConversation}
+                  onPin={(item) => void togglePin(item)}
+                  onDelete={setDeleting}
+                  onSelectedForDeleteChange={toggleConversationSelected}
+                />
               ))}
+              {recentConversations.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setGroupCollapsed((current) => !current)}
+                  aria-expanded={!groupCollapsed}
+                  className="sticky top-0 z-10 flex min-w-0 items-center gap-1.5 rounded-md bg-card px-1.5 py-1 text-left font-medium text-[11px] text-muted-foreground transition-colors hover:bg-accent/50"
+                >
+                  <ChevronRight
+                    className={cn("size-3 shrink-0 transition-transform", !groupCollapsed && "rotate-90")}
+                  />
+                  <Bot className="size-3 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">{copy.analyst}</span>
+                  {recentConversations.some((conversation) => conversation.running) && (
+                    <Spinner className="size-3 shrink-0" />
+                  )}
+                  <span className="shrink-0 tabular-nums opacity-60">{recentConversations.length}</span>
+                </button>
+              )}
+              {!groupCollapsed &&
+                recentConversations.map((conversation) => (
+                  <ConversationItem
+                    key={conversation.id}
+                    conversation={conversation}
+                    active={selectedID === conversation.id}
+                    dateLocale={dateLocale}
+                    selectionMode={selectionMode}
+                    selectedForDelete={selectedConversationIds.has(conversation.id)}
+                    onSelect={setSelectedID}
+                    onRename={renameConversation}
+                    onPin={(item) => void togglePin(item)}
+                    onDelete={setDeleting}
+                    onSelectedForDeleteChange={toggleConversationSelected}
+                  />
+                ))}
+              {visible.length < filtered.length && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="mt-1 w-full"
+                  onClick={() => setVisibleConversationCount((count) => count + CONVERSATION_LIST_PAGE)}
+                >
+                  {t("loadMore")}
+                </Button>
+              )}
             </div>
           </ScrollArea>
         </aside>
-        {selected ? (
-          <ConversationView
-            key={selected.id}
-            conversation={selected}
-            profiles={profiles}
-            onUpdated={reload}
-            onBack={() => setSelectedID(null)}
-          />
-        ) : (
-          <DraftView
-            profiles={profiles}
-            onStarted={(conversation) => {
-              setConversations((current) => [conversation, ...current.filter((item) => item.id !== conversation.id)]);
-              setSelectedID(conversation.id);
-              void reload();
-            }}
-          />
-        )}
-      </Card>
-
-      <Dialog
-        open={renaming != null}
-        onOpenChange={(open) => {
-          if (!open) setRenaming(null);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{copy.rename}</DialogTitle>
-          </DialogHeader>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void saveRename();
-            }}
-            className="space-y-4"
-          >
-            <Input
-              autoFocus
-              aria-label={copy.renameTitle}
-              value={renameText}
-              onChange={(event) => setRenameText(event.target.value)}
-              maxLength={240}
+        <div className="flex min-w-0 flex-col overflow-hidden rounded-lg border bg-card">
+          {selected ? (
+            <ConversationView key={selected.id} conversation={selected} profiles={profiles} onUpdated={reload} />
+          ) : selectedID != null ? (
+            <div role="status" className="p-6 text-sm text-muted-foreground">
+              {loaded ? t("deletedConversation") : t("loadingConversation")}
+            </div>
+          ) : (
+            <DraftView
+              profiles={profiles}
+              onStarted={(conversation) => {
+                setConversations((current) => [conversation, ...current.filter((item) => item.id !== conversation.id)]);
+                setSelectedID(conversation.id);
+                void reload();
+              }}
             />
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setRenaming(null)}>
-                {copy.cancel}
-              </Button>
-              <Button type="submit" disabled={actionBusy || !renameText.trim()}>
-                {copy.save}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+          )}
+        </div>
+      </div>
+
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("bulkDeleteTitle", { count: selectedConversationCount })}</AlertDialogTitle>
+            <AlertDialogDescription>{copy.deleteDescription}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkDeleting}>{copy.cancel}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={bulkDeleting || selectedConversationCount === 0}
+              onClick={(event) => {
+                event.preventDefault();
+                void deleteSelectedConversations();
+              }}
+            >
+              {bulkDeleting && <Loader2 data-icon="inline-start" className="animate-spin" />}
+              {bulkDeleting ? t("deleting") : t("confirmDelete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={deleting != null}

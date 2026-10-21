@@ -13,6 +13,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useActiveLocale } from "@/i18n/locale-store";
 import { type BlueCase, blueApi } from "@/lib/blue-api";
@@ -25,10 +27,16 @@ import {
 } from "@/lib/blue-task-api";
 import { blueTaskPriorityLabel, blueTaskStatusLabel, useBlueTaskCopy } from "@/lib/blue-task-copy";
 
-import { BlueError, BlueLoading, BluePageHeader, blueDate } from "../../_components/blue-ui";
+import { BlueError, BlueLoading, blueDate } from "../../_components/blue-ui";
 
 const STATUSES: BlueTaskStatus[] = ["open", "in_progress", "completed", "blocked"];
 const PRIORITIES: BlueTaskPriority[] = ["low", "medium", "high", "critical"];
+const TAB_LABELS = {
+  en: { overview: "Overview", analysis: "Analysis", result: "Result" },
+  ko: { overview: "개요", analysis: "분석", result: "결과" },
+  zh: { overview: "概览", analysis: "分析", result: "结果" },
+  es: { overview: "Resumen", analysis: "Análisis", result: "Resultado" },
+} as const;
 
 function BlueTaskDetailInner() {
   const params = useSearchParams();
@@ -47,6 +55,7 @@ function BlueTaskDetailInner() {
   const [priority, setPriority] = React.useState<BlueTaskPriority>("medium");
   const [status, setStatus] = React.useState<BlueTaskStatus>("open");
   const [result, setResult] = React.useState("");
+  const [tab, setTab] = React.useState("overview");
 
   const syncTask = React.useCallback((value: BlueTask) => {
     setTask(value);
@@ -140,48 +149,85 @@ function BlueTaskDetailInner() {
   }
 
   if (!Number.isSafeInteger(id) || id <= 0) {
-    return <BlueError message={copy.invalidTask} />;
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 p-10 text-center">
+        <BlueError message={copy.invalidTask} />
+        <Button asChild variant="outline">
+          <Link href="/blue/tasks">
+            <ArrowLeft /> {copy.back}
+          </Link>
+        </Button>
+      </div>
+    );
   }
 
-  const caseName = cases.find((item) => item.id === task?.case_id)?.title;
+  if (!task) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 p-10 text-center">
+        {error ? <BlueError message={error} retry={() => void load()} retryLabel={copy.refresh} /> : null}
+        {loading ? <BlueLoading label={copy.loading} /> : null}
+        <Button asChild variant="outline">
+          <Link href="/blue/tasks">
+            <ArrowLeft /> {copy.back}
+          </Link>
+        </Button>
+      </div>
+    );
+  }
+
+  const caseName = cases.find((item) => item.id === task.case_id)?.title;
+  const tabLabels = TAB_LABELS[locale];
 
   return (
-    <div className="space-y-5">
-      <Button asChild variant="ghost" size="sm" className="-ml-2">
-        <Link href="/blue/tasks">
-          <ArrowLeft />
-          {copy.back}
-        </Link>
-      </Button>
-      <BluePageHeader
-        title={task ? `#${task.id} ${task.title}` : copy.title}
-        description={copy.description}
-        actions={
-          <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
-            <RefreshCw className={loading ? "animate-spin" : ""} />
-            {copy.refresh}
+    <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-0">
+      <header className="sticky top-0 z-10 flex flex-col gap-2 border-b bg-background/95 px-4 py-2.5 backdrop-blur lg:px-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <SidebarTrigger className="-ml-1" />
+          <Button asChild variant="ghost" size="icon" className="size-7" aria-label={copy.back}>
+            <Link href="/blue/tasks">
+              <ArrowLeft />
+            </Link>
           </Button>
-        }
-      />
-      {error && <BlueError message={error} retry={() => void load()} retryLabel={copy.refresh} />}
-      {loading && !task ? <BlueLoading label={copy.loading} /> : null}
-      {task && (
-        <>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={task.status === "blocked" ? "destructive" : "secondary"}>
-              {blueTaskStatusLabel(task.status, copy)}
-            </Badge>
-            <Badge variant="outline">{blueTaskPriorityLabel(task.priority, copy)}</Badge>
-            <span className="text-muted-foreground text-xs">
-              {copy.createdAt}: {blueDate(task.created_at, locale)} · {copy.updated}:{" "}
-              {blueDate(task.updated_at, locale)}
-            </span>
-          </div>
+          <h1 className="min-w-0 flex-1 truncate font-semibold text-sm" title={task.title}>
+            {task.title}
+          </h1>
+          <code className="hidden rounded bg-muted px-1.5 py-0.5 font-mono text-muted-foreground text-xs sm:inline">
+            {task.id}
+          </code>
+          <Badge variant={task.status === "blocked" ? "destructive" : "secondary"}>
+            {blueTaskStatusLabel(task.status, copy)}
+          </Badge>
+          <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading} aria-label={copy.refresh}>
+            <RefreshCw className={loading ? "animate-spin" : ""} />
+            <span className="hidden sm:inline">{copy.refresh}</span>
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => void runAnalysis()}
+            disabled={!caseID || running || saving || analysisInProgress || !title.trim()}
+            aria-label={running ? copy.running : copy.run}
+          >
+            <Bot />
+            <span className="hidden sm:inline">{running ? copy.running : copy.run}</span>
+          </Button>
+        </div>
+        <p className="truncate text-muted-foreground text-xs">{task.description || copy.description}</p>
+        <div className="no-scrollbar min-w-0 overflow-x-auto">
+          <TabsList className="min-w-max">
+            <TabsTrigger value="overview">{tabLabels.overview}</TabsTrigger>
+            <TabsTrigger value="analysis">{tabLabels.analysis}</TabsTrigger>
+            <TabsTrigger value="result">{tabLabels.result}</TabsTrigger>
+          </TabsList>
+        </div>
+      </header>
 
+      <div className="flex-1 p-4 lg:p-6">
+        {error && <BlueError message={error} retry={() => void load()} retryLabel={copy.refresh} />}
+        <TabsContent value="overview" className="mt-0">
           <div className="grid gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
             <Card>
               <CardHeader>
-                <CardTitle>{copy.taskTitle}</CardTitle>
+                <CardTitle>{tabLabels.overview}</CardTitle>
               </CardHeader>
               <CardContent>
                 <form className="space-y-4" onSubmit={(event) => void save(event)}>
@@ -260,17 +306,6 @@ function BlueTaskDetailInner() {
                       </select>
                     </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="blue-task-detail-result">{copy.result}</Label>
-                    <Textarea
-                      id="blue-task-detail-result"
-                      value={result}
-                      onChange={(event) => setResult(event.target.value)}
-                      placeholder={copy.emptyResult}
-                      rows={10}
-                      disabled={analysisInProgress}
-                    />
-                  </div>
                   <Button type="submit" disabled={saving || running || analysisInProgress || !title.trim()}>
                     <Save />
                     {saving ? copy.saving : copy.save}
@@ -279,58 +314,87 @@ function BlueTaskDetailInner() {
               </CardContent>
             </Card>
 
-            <div className="space-y-5">
-              <Card>
-                <CardHeader>
-                  <CardTitle>{copy.case}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm">
-                  {task.case_id ? (
-                    <>
-                      <p>
-                        #{task.case_id} {caseName}
-                      </p>
-                      <Button asChild variant="outline" size="sm">
-                        <Link href={`/blue/cases/detail?id=${task.case_id}`}>
-                          <ExternalLink />
-                          {copy.caseLink}
-                        </Link>
-                      </Button>
-                    </>
-                  ) : (
-                    <p className="text-muted-foreground">{copy.noCase}</p>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>{copy.latestAnalysis}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm">
-                  <p className="text-muted-foreground">{copy.analystScope}</p>
-                  {analysisInProgress && <p role="status">{copy.analysisInProgress}</p>}
-                  {task.completed_at && (
-                    <p className="text-muted-foreground text-xs">
-                      {copy.completedAt}: {blueDate(task.completed_at, locale)}
+            <Card className="self-start">
+              <CardHeader>
+                <CardTitle>{copy.case}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                {task.case_id ? (
+                  <>
+                    <p>
+                      #{task.case_id} {caseName}
                     </p>
-                  )}
-                  {!caseID && <p className="text-muted-foreground text-xs">{copy.runNeedsCase}</p>}
-                  <Button
-                    size="sm"
-                    onClick={() => void runAnalysis()}
-                    disabled={!caseID || running || saving || analysisInProgress || !title.trim()}
-                  >
-                    <Bot />
-                    {running ? copy.running : copy.run}
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
+                    <Button asChild variant="outline" size="sm">
+                      <Link href={`/blue/cases/detail?id=${task.case_id}`}>
+                        <ExternalLink />
+                        {copy.caseLink}
+                      </Link>
+                    </Button>
+                  </>
+                ) : (
+                  <p className="text-muted-foreground">{copy.noCase}</p>
+                )}
+              </CardContent>
+            </Card>
           </div>
-        </>
-      )}
-    </div>
+        </TabsContent>
+
+        <TabsContent value="analysis" className="mt-0">
+          <Card>
+            <CardHeader>
+              <CardTitle>{copy.latestAnalysis}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 text-sm">
+              <p className="text-muted-foreground">{copy.analystScope}</p>
+              {analysisInProgress && <p role="status">{copy.analysisInProgress}</p>}
+              {!caseID && <p className="text-muted-foreground text-xs">{copy.runNeedsCase}</p>}
+              {task.completed_at && (
+                <p className="text-muted-foreground text-xs">
+                  {copy.completedAt}: {blueDate(task.completed_at, locale)}
+                </p>
+              )}
+              <Button
+                size="sm"
+                onClick={() => void runAnalysis()}
+                disabled={!caseID || running || saving || analysisInProgress || !title.trim()}
+              >
+                <Bot />
+                {running ? copy.running : copy.run}
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="result" className="mt-0">
+          <Card>
+            <CardHeader>
+              <CardTitle>{copy.result}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form className="space-y-4" onSubmit={(event) => void save(event)}>
+                <Label htmlFor="blue-task-detail-result">{copy.result}</Label>
+                <Textarea
+                  id="blue-task-detail-result"
+                  value={result}
+                  onChange={(event) => setResult(event.target.value)}
+                  placeholder={copy.emptyResult}
+                  rows={12}
+                  disabled={analysisInProgress}
+                />
+                <Button type="submit" disabled={saving || running || analysisInProgress || !title.trim()}>
+                  <Save />
+                  {saving ? copy.saving : copy.save}
+                </Button>
+              </form>
+              <p className="mt-4 text-muted-foreground text-xs">
+                {copy.createdAt}: {blueDate(task.created_at, locale)} · {copy.updated}:{" "}
+                {blueDate(task.updated_at, locale)}
+              </p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </div>
+    </Tabs>
   );
 }
 

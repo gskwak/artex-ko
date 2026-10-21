@@ -32,7 +32,60 @@ type SearchItem = {
   icon?: NavMainItem["icon"];
   disabled?: boolean;
   newTab?: boolean;
+  searchOnly?: boolean;
 };
+
+// These screens remain directly searchable after their sidebar links move into Investigation.
+const BLUE_INVESTIGATION_SEARCH_ITEMS: SearchItem[] = [
+  {
+    id: "blueCases",
+    headingKey: "group.function",
+    labelKey: "item.blueCases",
+    fallbackLabel: "Cases",
+    url: "/blue/cases",
+    searchOnly: true,
+  },
+  {
+    id: "blueEvents",
+    headingKey: "group.function",
+    labelKey: "item.blueEvents",
+    fallbackLabel: "Events",
+    url: "/blue/events",
+    searchOnly: true,
+  },
+  {
+    id: "blueDetection",
+    headingKey: "group.function",
+    labelKey: "item.blueDetection",
+    fallbackLabel: "Detection",
+    url: "/blue/detection",
+    searchOnly: true,
+  },
+  {
+    id: "blueAlerts",
+    headingKey: "group.function",
+    labelKey: "item.blueAlerts",
+    fallbackLabel: "Alerts",
+    url: "/blue/detection?tab=alerts",
+    searchOnly: true,
+  },
+  {
+    id: "blueRules",
+    headingKey: "group.function",
+    labelKey: "item.blueRules",
+    fallbackLabel: "Detection rules",
+    url: "/blue/detection?tab=rules",
+    searchOnly: true,
+  },
+  {
+    id: "blueActions",
+    headingKey: "group.function",
+    labelKey: "item.blueActions",
+    fallbackLabel: "Response actions",
+    url: "/blue/actions",
+    searchOnly: true,
+  },
+];
 
 // 그룹 번호 → nav.group.* 키. nav-main 과 같은 매핑을 쓴다.
 const GROUP_MESSAGE_KEY: Record<number, string> = { 1: "function", 2: "system", 3: "blue" };
@@ -92,8 +145,11 @@ export function SearchDialog() {
   const t = useTranslations("search");
   const tNav = useTranslations("nav");
   const { mode } = useTeamMode();
-  const searchItems = searchItemsFor(mode === "blue" ? blueSidebarItems : redSidebarItems);
-  const recommendations = getAvailableItems(searchItems);
+  const searchItems = [
+    ...searchItemsFor(mode === "blue" ? blueSidebarItems : redSidebarItems),
+    ...(mode === "blue" ? BLUE_INVESTIGATION_SEARCH_ITEMS : []),
+  ];
+  const recommendations = getAvailableItems(searchItems).filter((item) => !item.searchOnly);
   const labelOf = (item: SearchItem) => (tNav.has(item.labelKey) ? tNav(item.labelKey) : item.fallbackLabel);
 
   React.useEffect(() => {

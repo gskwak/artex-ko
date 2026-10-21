@@ -25,6 +25,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { type BlueOverview, blueRequest } from "@/lib/blue-api";
 
+import { BlueInvestigationTabs } from "../_components/investigation-tabs";
+
 type ActionStatus = "pending" | "approved" | "rejected" | "completed" | "failed";
 type StatusFilter = "all" | ActionStatus;
 type RecordMode = "approve" | "reject" | "complete" | "fail";
@@ -494,6 +496,8 @@ export default function BlueActionsPage() {
           <RefreshCw className="size-4" /> {t.refresh}
         </Button>
       </div>
+
+      <BlueInvestigationTabs active="actions" />
 
       <div role="note" className="rounded-lg border border-blue-300/50 bg-blue-500/5 px-4 py-3 text-sm text-foreground">
         {t.boundary}

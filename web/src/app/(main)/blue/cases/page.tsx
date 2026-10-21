@@ -34,6 +34,7 @@ import {
   BlueSeverityBadge,
   blueDate,
 } from "../_components/blue-ui";
+import { BlueInvestigationTabs } from "../_components/investigation-tabs";
 
 const CASE_STATUSES: BlueCaseStatus[] = ["open", "investigating", "contained", "resolved", "closed"];
 const SEVERITIES: BlueSeverity[] = ["info", "low", "medium", "high", "critical"];
@@ -199,6 +200,8 @@ export default function BlueCasesPage() {
           </>
         }
       />
+
+      <BlueInvestigationTabs active="cases" />
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-48 flex-1">

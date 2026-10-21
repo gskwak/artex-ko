@@ -5,39 +5,105 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { ArrowRight, Plus, RefreshCw, Search } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, ArrowUpDown, Plus, RefreshCw, Search, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { TablePagination } from "@/components/table-pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useActiveLocale } from "@/i18n/locale-store";
 import { type BlueCase, blueApi } from "@/lib/blue-api";
 import { type BlueTask, type BlueTaskPriority, type BlueTaskStatus, blueTaskApi } from "@/lib/blue-task-api";
 import { blueTaskPriorityLabel, blueTaskStatusLabel, useBlueTaskCopy } from "@/lib/blue-task-copy";
 
-import { BlueEmpty, BlueError, BlueLoading, BluePageHeader, blueDate } from "../_components/blue-ui";
+import { BlueError, BlueLoading, blueDate } from "../_components/blue-ui";
 
-const PAGE_SIZE = 50;
+const BATCH_SIZE = 50;
 const STATUSES: BlueTaskStatus[] = ["open", "in_progress", "completed", "blocked"];
 const PRIORITIES: BlueTaskPriority[] = ["low", "medium", "high", "critical"];
+const STATUS_RANK: Record<BlueTaskStatus, number> = { open: 0, in_progress: 1, blocked: 2, completed: 3 };
+const PRIORITY_RANK: Record<BlueTaskPriority, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+
+type SortField = "id" | "title" | "status" | "priority" | "updated";
+type SortDirection = "asc" | "desc";
+
+function SortHead({
+  field,
+  label,
+  activeField,
+  direction,
+  onSort,
+  className,
+}: {
+  field: SortField;
+  label: string;
+  activeField: SortField;
+  direction: SortDirection;
+  onSort: (field: SortField) => void;
+  className?: string;
+}) {
+  const active = field === activeField;
+  let ariaSort: React.AriaAttributes["aria-sort"] = "none";
+  let icon = <ArrowUpDown className="size-3.5 opacity-40 group-hover/sort:opacity-100" aria-hidden="true" />;
+  if (active) {
+    ariaSort = direction === "asc" ? "ascending" : "descending";
+    icon =
+      direction === "asc" ? (
+        <ArrowUp className="size-3.5" aria-hidden="true" />
+      ) : (
+        <ArrowDown className="size-3.5" aria-hidden="true" />
+      );
+  }
+  return (
+    <TableHead className={className} aria-sort={ariaSort}>
+      <button
+        type="button"
+        className="group/sort inline-flex w-full items-center gap-1 outline-none focus-visible:underline"
+        onClick={() => onSort(field)}
+      >
+        {label}
+        {icon}
+      </button>
+    </TableHead>
+  );
+}
+
+function compareTasks(left: BlueTask, right: BlueTask, field: SortField): number {
+  switch (field) {
+    case "id":
+      return left.id - right.id;
+    case "title":
+      return left.title.localeCompare(right.title);
+    case "status":
+      return STATUS_RANK[left.status] - STATUS_RANK[right.status];
+    case "priority":
+      return PRIORITY_RANK[left.priority] - PRIORITY_RANK[right.priority];
+    case "updated":
+      return Date.parse(left.updated_at) - Date.parse(right.updated_at);
+  }
+}
 
 export default function BlueTasksPage() {
   const router = useRouter();
   const copy = useBlueTaskCopy();
   const locale = useActiveLocale();
+  const requestSequence = React.useRef(0);
   const [tasks, setTasks] = React.useState<BlueTask[]>([]);
   const [cases, setCases] = React.useState<BlueCase[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -46,31 +112,48 @@ export default function BlueTasksPage() {
   const [error, setError] = React.useState("");
   const [search, setSearch] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState<BlueTaskStatus | "all">("all");
+  const [caseFilter, setCaseFilter] = React.useState("all");
+  const [sortField, setSortField] = React.useState<SortField>("updated");
+  const [sortDirection, setSortDirection] = React.useState<SortDirection>("desc");
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(20);
   const [createOpen, setCreateOpen] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [title, setTitle] = React.useState("");
   const [description, setDescription] = React.useState("");
-  const [caseID, setCaseID] = React.useState("");
+  const [caseID, setCaseID] = React.useState("none");
   const [priority, setPriority] = React.useState<BlueTaskPriority>("medium");
 
+  const taskQuery = React.useCallback(
+    (offset: number) => ({
+      status: statusFilter === "all" ? undefined : statusFilter,
+      case_id: caseFilter === "all" ? undefined : Number(caseFilter),
+      limit: BATCH_SIZE + 1,
+      offset,
+    }),
+    [caseFilter, statusFilter],
+  );
+
   const load = React.useCallback(async () => {
+    const sequence = ++requestSequence.current;
     setLoading(true);
     setError("");
     try {
-      const result = await blueTaskApi.list({
-        status: statusFilter === "all" ? undefined : statusFilter,
-        limit: PAGE_SIZE + 1,
-      });
-      setTasks(result.slice(0, PAGE_SIZE));
-      setHasMore(result.length > PAGE_SIZE);
+      const result = await blueTaskApi.list(taskQuery(0));
+      if (sequence !== requestSequence.current) return;
+      setTasks(result.slice(0, BATCH_SIZE));
+      setHasMore(result.length > BATCH_SIZE);
     } catch (cause) {
+      if (sequence !== requestSequence.current) return;
       setError(cause instanceof Error ? cause.message : copy.loadFailed);
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
-  }, [copy.loadFailed, statusFilter]);
+  }, [copy.loadFailed, taskQuery]);
 
   React.useEffect(() => {
+    setTasks([]);
+    setPage(1);
     void load();
   }, [load]);
 
@@ -82,21 +165,21 @@ export default function BlueTasksPage() {
   }, []);
 
   async function loadMore() {
-    if (loadingMore || !hasMore) return;
+    if (loading || loadingMore || !hasMore) return;
+    const sequence = requestSequence.current;
     setLoadingMore(true);
     try {
-      const result = await blueTaskApi.list({
-        status: statusFilter === "all" ? undefined : statusFilter,
-        limit: PAGE_SIZE + 1,
-        offset: tasks.length,
-      });
+      const result = await blueTaskApi.list(taskQuery(tasks.length));
+      if (sequence !== requestSequence.current) return;
       setTasks((current) => {
         const known = new Set(current.map((task) => task.id));
-        return [...current, ...result.slice(0, PAGE_SIZE).filter((task) => !known.has(task.id))];
+        return [...current, ...result.slice(0, BATCH_SIZE).filter((task) => !known.has(task.id))];
       });
-      setHasMore(result.length > PAGE_SIZE);
+      setHasMore(result.length > BATCH_SIZE);
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : copy.loadFailed);
+      if (sequence === requestSequence.current) {
+        toast.error(cause instanceof Error ? cause.message : copy.loadFailed);
+      }
     } finally {
       setLoadingMore(false);
     }
@@ -111,12 +194,12 @@ export default function BlueTasksPage() {
         title: title.trim(),
         description: description.trim(),
         priority,
-        ...(caseID ? { case_id: Number(caseID) } : {}),
+        ...(caseID !== "none" ? { case_id: Number(caseID) } : {}),
       });
       setCreateOpen(false);
       setTitle("");
       setDescription("");
-      setCaseID("");
+      setCaseID("none");
       setPriority("medium");
       toast.success(copy.created);
       router.push(`/blue/tasks/detail?id=${task.id}`);
@@ -127,183 +210,296 @@ export default function BlueTasksPage() {
     }
   }
 
-  const query = search.trim().toLocaleLowerCase();
-  const visible = tasks.filter((task) =>
-    query ? `${task.id} ${task.title} ${task.description} ${task.result}`.toLocaleLowerCase().includes(query) : true,
-  );
-  const caseNames = new Map(cases.map((item) => [item.id, item.title]));
+  const caseNames = React.useMemo(() => new Map(cases.map((item) => [item.id, item.title])), [cases]);
+  const visible = React.useMemo(() => {
+    const query = search.trim().toLocaleLowerCase();
+    const filtered = tasks.filter((task) =>
+      query
+        ? `${task.id} ${task.title} ${task.description} ${task.result} ${caseNames.get(task.case_id ?? -1) ?? ""}`
+            .toLocaleLowerCase()
+            .includes(query)
+        : true,
+    );
+    return filtered.sort((left, right) => {
+      const result = compareTasks(left, right, sortField);
+      return (sortDirection === "asc" ? result : -result) || right.id - left.id;
+    });
+  }, [caseNames, search, sortDirection, sortField, tasks]);
+  const shown = visible.slice((page - 1) * pageSize, page * pageSize);
+
+  function sortBy(field: SortField) {
+    if (field === sortField) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDirection(field === "updated" || field === "id" ? "desc" : "asc");
+    }
+    setPage(1);
+  }
 
   return (
-    <div className="space-y-5">
-      <BluePageHeader
-        title={copy.title}
-        description={copy.description}
-        actions={
-          <>
-            <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
-              <RefreshCw className={loading ? "animate-spin" : ""} />
-              {copy.refresh}
-            </Button>
-            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm">
-                  <Plus />
-                  {copy.createTask}
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>{copy.createTask}</DialogTitle>
-                  <DialogDescription>{copy.createDescription}</DialogDescription>
-                </DialogHeader>
-                <form className="space-y-4" onSubmit={(event) => void createTask(event)}>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="blue-task-title">{copy.taskTitle}</Label>
-                    <Input
-                      id="blue-task-title"
-                      value={title}
-                      onChange={(event) => setTitle(event.target.value)}
-                      maxLength={240}
-                      required
-                      autoFocus
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="blue-task-description">{copy.taskDescription}</Label>
-                    <Textarea
-                      id="blue-task-description"
-                      value={description}
-                      onChange={(event) => setDescription(event.target.value)}
-                      rows={4}
-                    />
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="blue-task-case">{copy.case}</Label>
-                      <select
-                        id="blue-task-case"
-                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                        value={caseID}
-                        onChange={(event) => setCaseID(event.target.value)}
-                      >
-                        <option value="">{copy.noCase}</option>
-                        {cases.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            #{item.id} {item.title}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="blue-task-priority">{copy.priority}</Label>
-                      <select
-                        id="blue-task-priority"
-                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                        value={priority}
-                        onChange={(event) => setPriority(event.target.value as BlueTaskPriority)}
-                      >
-                        {PRIORITIES.map((value) => (
-                          <option key={value} value={value}>
-                            {blueTaskPriorityLabel(value, copy)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
-                      {copy.cancel}
-                    </Button>
-                    <Button type="submit" disabled={creating || !title.trim()}>
-                      {creating ? copy.creating : copy.create}
-                    </Button>
-                  </DialogFooter>
-                </form>
-              </DialogContent>
-            </Dialog>
-          </>
-        }
-      />
-
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-48 flex-1">
-          <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            aria-label={copy.search}
-            placeholder={copy.search}
-            className="pl-9"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-        </div>
-        <select
-          aria-label={copy.status}
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-          value={statusFilter}
-          onChange={(event) => setStatusFilter(event.target.value as BlueTaskStatus | "all")}
-        >
-          <option value="all">{copy.allStatuses}</option>
-          {STATUSES.map((value) => (
-            <option key={value} value={value}>
-              {blueTaskStatusLabel(value, copy)}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {error && <BlueError message={error} retry={() => void load()} retryLabel={copy.refresh} />}
-      {loading && tasks.length === 0 ? <BlueLoading label={copy.loading} /> : null}
-      {!loading && visible.length === 0 ? <BlueEmpty message={copy.noTasks} /> : null}
-      {visible.length > 0 && (
-        <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-          {visible.map((task) => (
-            <Card key={task.id} className="transition-colors hover:border-primary/50">
-              <CardContent className="space-y-3 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <Link
-                      className="line-clamp-2 font-semibold hover:underline"
-                      href={`/blue/tasks/detail?id=${task.id}`}
-                    >
-                      #{task.id} {task.title}
-                    </Link>
-                    <p className="mt-1 line-clamp-2 text-muted-foreground text-sm">
-                      {task.description || task.result || copy.createDescription}
-                    </p>
-                  </div>
-                  <Button asChild variant="ghost" size="icon-sm" aria-label={`${copy.taskTitle} #${task.id}`}>
-                    <Link href={`/blue/tasks/detail?id=${task.id}`}>
-                      <ArrowRight />
-                    </Link>
+    <div className="space-y-4">
+      <h1 className="sr-only">{copy.title}</h1>
+      <Card>
+        <CardContent className="flex flex-col gap-4 px-0 pt-6">
+          <div className="flex flex-wrap items-center gap-2 px-4 lg:px-6">
+            <div className="relative w-full sm:max-w-xs">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                aria-label={copy.search}
+                placeholder={copy.search}
+                className="pr-8 pl-8"
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setPage(1);
+                }}
+              />
+              {search && (
+                <button
+                  type="button"
+                  className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  aria-label={copy.clearSearch}
+                  onClick={() => {
+                    setSearch("");
+                    setPage(1);
+                  }}
+                >
+                  <X className="size-4" />
+                </button>
+              )}
+            </div>
+            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as BlueTaskStatus | "all")}>
+              <SelectTrigger className="w-36" aria-label={copy.status}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{copy.allStatuses}</SelectItem>
+                {STATUSES.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {blueTaskStatusLabel(value, copy)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={caseFilter} onValueChange={setCaseFilter}>
+              <SelectTrigger className="w-44" aria-label={copy.case}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{copy.allCases}</SelectItem>
+                {cases.map((item) => (
+                  <SelectItem key={item.id} value={String(item.id)}>
+                    #{item.id} {item.title}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-muted-foreground text-xs tabular-nums">
+              {visible.length} / {tasks.length}
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
+                <RefreshCw className={loading ? "animate-spin" : ""} />
+                {copy.refresh}
+              </Button>
+              <Sheet open={createOpen} onOpenChange={setCreateOpen}>
+                <SheetTrigger asChild>
+                  <Button size="sm">
+                    <Plus />
+                    {copy.createTask}
                   </Button>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={task.status === "blocked" ? "destructive" : "secondary"}>
-                    {blueTaskStatusLabel(task.status, copy)}
-                  </Badge>
-                  <Badge variant="outline">{blueTaskPriorityLabel(task.priority, copy)}</Badge>
-                  {task.case_id && (
-                    <Badge variant="outline">
-                      {copy.case} #{task.case_id}
-                      {caseNames.get(task.case_id) ? ` · ${caseNames.get(task.case_id)}` : ""}
-                    </Badge>
-                  )}
-                </div>
-                <p className="text-muted-foreground text-xs">
-                  {copy.updated}: {blueDate(task.updated_at, locale)}
-                </p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-      {hasMore && (
-        <div className="flex justify-center">
-          <Button variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>
-            {loadingMore ? copy.loadingMore : copy.loadMore}
-          </Button>
-        </div>
-      )}
+                </SheetTrigger>
+                <SheetContent className="h-full w-full gap-0 overflow-hidden p-0 data-[side=right]:sm:max-w-xl">
+                  <form className="flex min-h-0 flex-1 flex-col" onSubmit={(event) => void createTask(event)}>
+                    <SheetHeader className="border-b p-6">
+                      <SheetTitle>{copy.createTask}</SheetTitle>
+                      <SheetDescription>{copy.createDescription}</SheetDescription>
+                    </SheetHeader>
+                    <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-6">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="blue-task-title">{copy.taskTitle}</Label>
+                        <Input
+                          id="blue-task-title"
+                          value={title}
+                          onChange={(event) => setTitle(event.target.value)}
+                          maxLength={240}
+                          required
+                          autoFocus
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="blue-task-description">{copy.taskDescription}</Label>
+                        <Textarea
+                          id="blue-task-description"
+                          value={description}
+                          onChange={(event) => setDescription(event.target.value)}
+                          rows={6}
+                        />
+                      </div>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="blue-task-case">{copy.case}</Label>
+                          <Select value={caseID} onValueChange={setCaseID}>
+                            <SelectTrigger id="blue-task-case" className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">{copy.noCase}</SelectItem>
+                              {cases.map((item) => (
+                                <SelectItem key={item.id} value={String(item.id)}>
+                                  #{item.id} {item.title}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="blue-task-priority">{copy.priority}</Label>
+                          <Select value={priority} onValueChange={(value) => setPriority(value as BlueTaskPriority)}>
+                            <SelectTrigger id="blue-task-priority" className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {PRIORITIES.map((value) => (
+                                <SelectItem key={value} value={value}>
+                                  {blueTaskPriorityLabel(value, copy)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+                    <SheetFooter className="mt-0 flex-row justify-end border-t p-4">
+                      <SheetClose asChild>
+                        <Button type="button" variant="outline" disabled={creating}>
+                          {copy.cancel}
+                        </Button>
+                      </SheetClose>
+                      <Button type="submit" disabled={creating || !title.trim()}>
+                        {creating ? copy.creating : copy.create}
+                      </Button>
+                    </SheetFooter>
+                  </form>
+                </SheetContent>
+              </Sheet>
+            </div>
+          </div>
+
+          {error && (
+            <div className="px-4 lg:px-6">
+              <BlueError message={error} retry={() => void load()} retryLabel={copy.refresh} />
+            </div>
+          )}
+          {loading && tasks.length === 0 ? <BlueLoading label={copy.loading} /> : null}
+          {!loading && visible.length === 0 ? (
+            <div className="mx-4 flex items-center justify-center rounded-lg border border-dashed py-20 text-muted-foreground text-sm lg:mx-6">
+              {tasks.length === 0 && !search.trim() && statusFilter === "all" && caseFilter === "all"
+                ? copy.noTasks
+                : copy.noMatch}
+            </div>
+          ) : null}
+          {visible.length > 0 && (
+            <Table className="**:data-[slot='table-cell']:px-4 **:data-[slot='table-head']:px-4">
+              <TableHeader className="[&_tr]:border-t">
+                <TableRow>
+                  <SortHead field="id" label="ID" activeField={sortField} direction={sortDirection} onSort={sortBy} />
+                  <SortHead
+                    field="title"
+                    label={copy.taskTitle}
+                    activeField={sortField}
+                    direction={sortDirection}
+                    onSort={sortBy}
+                  />
+                  <TableHead>{copy.taskDescription}</TableHead>
+                  <TableHead>{copy.case}</TableHead>
+                  <SortHead
+                    field="status"
+                    label={copy.status}
+                    activeField={sortField}
+                    direction={sortDirection}
+                    onSort={sortBy}
+                  />
+                  <SortHead
+                    field="priority"
+                    label={copy.priority}
+                    activeField={sortField}
+                    direction={sortDirection}
+                    onSort={sortBy}
+                  />
+                  <SortHead
+                    field="updated"
+                    label={copy.updated}
+                    activeField={sortField}
+                    direction={sortDirection}
+                    onSort={sortBy}
+                  />
+                  <TableHead className="text-right">{copy.actions}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {shown.map((task) => (
+                  <TableRow key={task.id}>
+                    <TableCell className="font-mono text-muted-foreground text-xs">{task.id}</TableCell>
+                    <TableCell className="max-w-52 font-medium">
+                      <Link
+                        href={`/blue/tasks/detail?id=${task.id}`}
+                        className="block truncate hover:underline"
+                        title={task.title}
+                      >
+                        {task.title}
+                      </Link>
+                    </TableCell>
+                    <TableCell
+                      className="max-w-64 truncate text-muted-foreground"
+                      title={task.description || task.result}
+                    >
+                      {task.description || task.result || "—"}
+                    </TableCell>
+                    <TableCell className="max-w-52 truncate">
+                      {task.case_id ? `#${task.case_id} ${caseNames.get(task.case_id) ?? ""}` : copy.noCase}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={task.status === "blocked" ? "destructive" : "secondary"}>
+                        {blueTaskStatusLabel(task.status, copy)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{blueTaskPriorityLabel(task.priority, copy)}</Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs">{blueDate(task.updated_at, locale)}</TableCell>
+                    <TableCell className="text-right">
+                      <Button asChild variant="ghost" size="icon-sm" aria-label={`${copy.taskTitle} #${task.id}`}>
+                        <Link href={`/blue/tasks/detail?id=${task.id}`}>
+                          <ArrowRight />
+                        </Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+          <TablePagination
+            page={page}
+            pageSize={pageSize}
+            total={visible.length}
+            onPageChange={setPage}
+            onPageSizeChange={(value) => {
+              setPageSize(value);
+              setPage(1);
+            }}
+          />
+          {hasMore && (
+            <div className="flex justify-center border-t px-4 py-3">
+              <Button variant="outline" onClick={() => void loadMore()} disabled={loading || loadingMore}>
+                {loadingMore ? copy.loadingMore : copy.loadMore}
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
